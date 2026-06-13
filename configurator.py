@@ -7,7 +7,9 @@ import subprocess
 import threading
 import requests
 import tkinter as tk
-from tkinter import messagebox, ttk, simpledialog
+from tkinter import ttk, simpledialog
+
+messagebox = None
 
 
 # Paths
@@ -26,15 +28,215 @@ ACCENT_BLUE = "#3b82f6"
 ACCENT_RED = "#ef4444"
 BORDER_COLOR = "#29292e"
 
-class CustomAddAddressDialog(tk.Toplevel):
-    def __init__(self, parent, addr_type, title="Add Tracked Address"):
+# Application Base64 GIF Icon (16x16 blue circle)
+APP_ICON_BASE64 = (
+    "R0lGODlhEAAQAPMAAAAAAP///wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "ACH5BAEAAAEALAAAAAAQABAAQAM4CLrc/jDKKau9OAuyNu/gGBhCgG3MYKaGia5rurbtGMR0LNf2fed2"
+    "D+R8OBwuh8TksIhMDovEYBEIADs="
+)
+
+class CustomMessageDialog(tk.Toplevel):
+    def __init__(self, parent, title, message, dialog_type="info"):
         super().__init__(parent)
         self.title(title)
-        self.geometry("450x220")
+        self.geometry("400x180")
         self.resizable(False, False)
         self.configure(bg=BG_MAIN)
         self.transient(parent)
         self.grab_set()
+        
+        # Border
+        self.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
+        self.overrideredirect(True)
+        
+        # Center dialog
+        self.update_idletasks()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        px = parent.winfo_rootx()
+        py = parent.winfo_rooty()
+        dw = self.winfo_width()
+        dh = self.winfo_height()
+        x = px + (pw - dw) // 2
+        y = py + (ph - dh) // 2
+        self.geometry(f"+{x}+{y}")
+        
+        # Title bar
+        title_bar = tk.Frame(self, bg=BG_CARD, height=30)
+        title_bar.pack(fill=tk.X, side=tk.TOP)
+        
+        lbl_title = tk.Label(title_bar, text=title, bg=BG_CARD, fg=TEXT_COLOR, font=("Helvetica", 9, "bold"))
+        lbl_title.pack(side=tk.LEFT, padx=10)
+        
+        btn_close = tk.Button(
+            title_bar, 
+            text="✕", 
+            bg=BG_CARD, 
+            fg=TEXT_MUTED, 
+            activebackground=ACCENT_RED, 
+            activeforeground="#ffffff", 
+            bd=0, 
+            font=("Helvetica", 9), 
+            command=self.destroy,
+            width=3,
+            relief=tk.FLAT
+        )
+        btn_close.pack(side=tk.RIGHT, fill=tk.Y)
+        btn_close.bind("<Enter>", lambda e: btn_close.config(bg=ACCENT_RED, fg="#ffffff"))
+        btn_close.bind("<Leave>", lambda e: btn_close.config(bg=BG_CARD, fg=TEXT_MUTED))
+        
+        # Dragging logic
+        def start_move(e):
+            self.x = e.x
+            self.y = e.y
+        def drag(e):
+            deltax = e.x - self.x
+            deltay = e.y - self.y
+            self.geometry(f"+{self.winfo_x() + deltax}+{self.winfo_y() + deltay}")
+        title_bar.bind("<ButtonPress-1>", start_move)
+        title_bar.bind("<B1-Motion>", drag)
+        lbl_title.bind("<ButtonPress-1>", start_move)
+        lbl_title.bind("<B1-Motion>", drag)
+        
+        # Symbols mapping to avoid emoji box issues on Linux
+        color_map = {
+            "info": ACCENT_BLUE,
+            "error": ACCENT_RED,
+            "warning": "#fbbf24"
+        }
+        symbol_map = {
+            "info": "[i]",
+            "error": "[!]",
+            "warning": "[!]"
+        }
+        accent_color = color_map.get(dialog_type, ACCENT_BLUE)
+        accent_symbol = symbol_map.get(dialog_type, "[i]")
+        
+        content_frame = tk.Frame(self, bg=BG_MAIN)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=15)
+        
+        lbl_icon = tk.Label(content_frame, text=accent_symbol, bg=BG_MAIN, fg=accent_color, font=("Courier", 18, "bold"))
+        lbl_icon.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 15))
+        
+        msg_lbl = tk.Label(content_frame, text=message, bg=BG_MAIN, fg=TEXT_COLOR, justify=tk.LEFT, font=("Helvetica", 10), wraplength=300)
+        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.W)
+        
+        btn_frame = tk.Frame(self, bg=BG_MAIN, pady=10)
+        btn_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        
+        btn_ok = ttk.Button(btn_frame, text="OK", style="Blue.TButton", command=self.destroy, width=10)
+        btn_ok.pack(anchor=tk.CENTER)
+        
+        self.bind("<Return>", lambda e: self.destroy())
+        self.bind("<Escape>", lambda e: self.destroy())
+
+class CustomConfirmDialog(tk.Toplevel):
+    def __init__(self, parent, title, message):
+        super().__init__(parent)
+        self.title(title)
+        self.geometry("400x180")
+        self.resizable(False, False)
+        self.configure(bg=BG_MAIN)
+        self.transient(parent)
+        self.grab_set()
+        self.result = False
+        
+        # Border
+        self.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
+        self.overrideredirect(True)
+        
+        # Center dialog
+        self.update_idletasks()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        px = parent.winfo_rootx()
+        py = parent.winfo_rooty()
+        dw = self.winfo_width()
+        dh = self.winfo_height()
+        x = px + (pw - dw) // 2
+        y = py + (ph - dh) // 2
+        self.geometry(f"+{x}+{y}")
+        
+        # Title bar
+        title_bar = tk.Frame(self, bg=BG_CARD, height=30)
+        title_bar.pack(fill=tk.X, side=tk.TOP)
+        
+        lbl_title = tk.Label(title_bar, text=title, bg=BG_CARD, fg=TEXT_COLOR, font=("Helvetica", 9, "bold"))
+        lbl_title.pack(side=tk.LEFT, padx=10)
+        
+        # Dragging logic
+        def start_move(e):
+            self.x = e.x
+            self.y = e.y
+        def drag(e):
+            deltax = e.x - self.x
+            deltay = e.y - self.y
+            self.geometry(f"+{self.winfo_x() + deltax}+{self.winfo_y() + deltay}")
+        title_bar.bind("<ButtonPress-1>", start_move)
+        title_bar.bind("<B1-Motion>", drag)
+        lbl_title.bind("<ButtonPress-1>", start_move)
+        lbl_title.bind("<B1-Motion>", drag)
+        
+        content_frame = tk.Frame(self, bg=BG_MAIN)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=15)
+        
+        lbl_icon = tk.Label(content_frame, text="[?]", bg=BG_MAIN, fg=ACCENT_BLUE, font=("Courier", 18, "bold"))
+        lbl_icon.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 15))
+        
+        msg_lbl = tk.Label(content_frame, text=message, bg=BG_MAIN, fg=TEXT_COLOR, justify=tk.LEFT, font=("Helvetica", 10), wraplength=300)
+        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.W)
+        
+        btn_frame = tk.Frame(self, bg=BG_MAIN, pady=10)
+        btn_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        
+        btn_no = ttk.Button(btn_frame, text="No", style="Gray.TButton", command=self.on_no, width=10)
+        btn_no.pack(side=tk.RIGHT, padx=(5, 20))
+        
+        btn_yes = ttk.Button(btn_frame, text="Yes", style="Blue.TButton", command=self.on_yes, width=10)
+        btn_yes.pack(side=tk.RIGHT)
+        
+        self.bind("<Return>", lambda e: self.on_yes())
+        self.bind("<Escape>", lambda e: self.on_no())
+        
+    def on_yes(self):
+        self.result = True
+        self.destroy()
+        
+    def on_no(self):
+        self.result = False
+        self.destroy()
+
+class MessageBoxWrapper:
+    def __init__(self, root):
+        self.root = root
+        
+    def showinfo(self, title, message):
+        CustomMessageDialog(self.root, title, message, "info")
+        
+    def showerror(self, title, message):
+        CustomMessageDialog(self.root, title, message, "error")
+        
+    def showwarning(self, title, message):
+        CustomMessageDialog(self.root, title, message, "warning")
+        
+    def askyesno(self, title, message):
+        dialog = CustomConfirmDialog(self.root, title, message)
+        self.root.wait_window(dialog)
+        return dialog.result
+
+class CustomAddAddressDialog(tk.Toplevel):
+    def __init__(self, parent, addr_type, title="Add Tracked Address"):
+        super().__init__(parent)
+        self.title(title)
+        self.geometry("450x245")
+        self.resizable(False, False)
+        self.configure(bg=BG_MAIN)
+        self.transient(parent)
+        self.grab_set()
+        
+        # Border and borderless
+        self.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
+        self.overrideredirect(True)
         
         self.addr_type = addr_type
         self.result = None
@@ -50,6 +252,44 @@ class CustomAddAddressDialog(tk.Toplevel):
         y = py + (ph - dh) // 2
         self.geometry(f"+{x}+{y}")
         
+        # Custom Title Bar
+        title_bar = tk.Frame(self, bg=BG_CARD, height=30)
+        title_bar.pack(fill=tk.X, side=tk.TOP)
+        
+        lbl_title_bar = tk.Label(title_bar, text=title, bg=BG_CARD, fg=TEXT_COLOR, font=("Helvetica", 9, "bold"))
+        lbl_title_bar.pack(side=tk.LEFT, padx=10)
+        
+        btn_close = tk.Button(
+            title_bar, 
+            text="✕", 
+            bg=BG_CARD, 
+            fg=TEXT_MUTED, 
+            activebackground=ACCENT_RED, 
+            activeforeground="#ffffff", 
+            bd=0, 
+            font=("Helvetica", 9), 
+            command=self.destroy,
+            width=3,
+            relief=tk.FLAT
+        )
+        btn_close.pack(side=tk.RIGHT, fill=tk.Y)
+        btn_close.bind("<Enter>", lambda e: btn_close.config(bg=ACCENT_RED, fg="#ffffff"))
+        btn_close.bind("<Leave>", lambda e: btn_close.config(bg=BG_CARD, fg=TEXT_MUTED))
+        
+        # Dragging logic
+        def start_move(e):
+            self.x = e.x
+            self.y = e.y
+        def drag(e):
+            deltax = e.x - self.x
+            deltay = e.y - self.y
+            self.geometry(f"+{self.winfo_x() + deltax}+{self.winfo_y() + deltay}")
+        title_bar.bind("<ButtonPress-1>", start_move)
+        title_bar.bind("<B1-Motion>", drag)
+        lbl_title_bar.bind("<ButtonPress-1>", start_move)
+        lbl_title_bar.bind("<B1-Motion>", drag)
+        
+        # Main form UI
         lbl_title = ttk.Label(self, text=f"Add {'User Wallet' if addr_type == 'user' else 'Token Account'}", font=("Helvetica", 12, "bold"), background=BG_MAIN, foreground=TEXT_COLOR)
         lbl_title.pack(anchor=tk.W, padx=20, pady=(15, 10))
         
@@ -107,6 +347,14 @@ class ConfiguratorApp:
         self.root.geometry("820x720")
         self.root.configure(bg=BG_MAIN)
         
+        # Borderless main window with custom border
+        self.root.overrideredirect(True)
+        self.root.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
+        
+        # Custom messagebox wrapper
+        global messagebox
+        messagebox = MessageBoxWrapper(self.root)
+        
         # Subprocess tracker
         self.tracker_process = None
         
@@ -120,6 +368,7 @@ class ConfiguratorApp:
         
         # Process monitor loop
         self.check_process()
+        self.root.focus_force()
         
         # Auto-start bot if configured
         if self.auto_start == "true":
@@ -156,6 +405,94 @@ class ConfiguratorApp:
         style.map("Gray.TButton", background=[("active", "#4e4e54")])
 
     def build_ui(self):
+        # Custom Title Bar
+        self.title_bar = tk.Frame(self.root, bg=BG_CARD, height=35)
+        self.title_bar.pack(fill=tk.X, side=tk.TOP)
+        
+        try:
+            self.icon_img = tk.PhotoImage(data=APP_ICON_BASE64)
+            lbl_icon_bar = tk.Label(self.title_bar, image=self.icon_img, bg=BG_CARD)
+            lbl_icon_bar.pack(side=tk.LEFT, padx=(10, 5))
+            self.root.iconphoto(True, self.icon_img)
+        except Exception:
+            pass
+            
+        lbl_title = tk.Label(self.title_bar, text="Solana Telegram Tracker Configurator", bg=BG_CARD, fg=TEXT_COLOR, font=("Helvetica", 9, "bold"))
+        lbl_title.pack(side=tk.LEFT)
+        
+        # Window controls
+        btn_close = tk.Button(
+            self.title_bar, 
+            text="✕", 
+            bg=BG_CARD, 
+            fg=TEXT_MUTED, 
+            activebackground=ACCENT_RED, 
+            activeforeground="#ffffff", 
+            bd=0, 
+            font=("Helvetica", 9), 
+            command=self.clean_exit,
+            width=5,
+            relief=tk.FLAT
+        )
+        btn_close.pack(side=tk.RIGHT, fill=tk.Y)
+        btn_close.bind("<Enter>", lambda e: btn_close.config(bg=ACCENT_RED, fg="#ffffff"))
+        btn_close.bind("<Leave>", lambda e: btn_close.config(bg=BG_CARD, fg=TEXT_MUTED))
+        
+        self.is_maximized = False
+        self.normal_geom = "820x720"
+        
+        btn_max = tk.Button(
+            self.title_bar, 
+            text="🗖", 
+            bg=BG_CARD, 
+            fg=TEXT_MUTED, 
+            activebackground="#29292e", 
+            activeforeground=TEXT_COLOR, 
+            bd=0, 
+            font=("Helvetica", 9), 
+            command=self.toggle_maximize,
+            width=5,
+            relief=tk.FLAT
+        )
+        btn_max.pack(side=tk.RIGHT, fill=tk.Y)
+        btn_max.bind("<Enter>", lambda e: btn_max.config(bg="#2d2d30", fg=TEXT_COLOR))
+        btn_max.bind("<Leave>", lambda e: btn_max.config(bg=BG_CARD, fg=TEXT_MUTED))
+        
+        btn_min = tk.Button(
+            self.title_bar, 
+            text="—", 
+            bg=BG_CARD, 
+            fg=TEXT_MUTED, 
+            activebackground="#29292e", 
+            activeforeground=TEXT_COLOR, 
+            bd=0, 
+            font=("Helvetica", 9), 
+            command=self.minimize_window,
+            width=5,
+            relief=tk.FLAT
+        )
+        btn_min.pack(side=tk.RIGHT, fill=tk.Y)
+        btn_min.bind("<Enter>", lambda e: btn_min.config(bg="#2d2d30", fg=TEXT_COLOR))
+        btn_min.bind("<Leave>", lambda e: btn_min.config(bg=BG_CARD, fg=TEXT_MUTED))
+        
+        # Dragging logic
+        def start_move(e):
+            self.drag_x = e.x
+            self.drag_y = e.y
+        def drag(e):
+            if self.is_maximized:
+                self.toggle_maximize()
+            deltax = e.x - self.drag_x
+            deltay = e.y - self.drag_y
+            x = self.root.winfo_x() + deltax
+            y = self.root.winfo_y() + deltay
+            self.root.geometry(f"+{x}+{y}")
+            
+        self.title_bar.bind("<ButtonPress-1>", start_move)
+        self.title_bar.bind("<B1-Motion>", drag)
+        lbl_title.bind("<ButtonPress-1>", start_move)
+        lbl_title.bind("<B1-Motion>", drag)
+
         # Configure min size of root window
         self.root.minsize(800, 600)
         
@@ -207,8 +544,11 @@ class ConfiguratorApp:
         # Chat ID
         ttk.Label(conn_inner, text="Telegram Chat ID:", background=BG_CARD, foreground=TEXT_COLOR).grid(row=2, column=0, sticky=tk.W)
         self.chat_id_var = tk.StringVar(value=self.chat_id)
-        self.chat_id_entry = tk.Entry(conn_inner, textvariable=self.chat_id_var, bg=BG_MAIN, fg=TEXT_COLOR, insertbackground=TEXT_COLOR, bd=1, relief=tk.SOLID)
-        self.chat_id_entry.grid(row=2, column=1, columnspan=2, sticky=tk.EW, padx=10, pady=5)
+        self.chat_id_entry = tk.Entry(conn_inner, textvariable=self.chat_id_var, bg=BG_MAIN, fg=TEXT_COLOR, insertbackground=TEXT_COLOR, show="*", bd=1, relief=tk.SOLID)
+        self.chat_id_entry.grid(row=2, column=1, sticky=tk.EW, padx=10, pady=5)
+        
+        self.show_chat_id_btn = ttk.Button(conn_inner, text="Show", width=6, style="Gray.TButton", command=self.toggle_chat_id_visibility)
+        self.show_chat_id_btn.grid(row=2, column=2, sticky=tk.W)
         
         # Chat ID Hint
         self.chat_id_hint = ttk.Label(conn_inner, text="Hint: Group Chat IDs usually begin with a minus sign (e.g. -100123456789)", background=BG_CARD, foreground=TEXT_MUTED, font=("Helvetica", 8))
@@ -472,11 +812,11 @@ class ConfiguratorApp:
                     rpc_errors.append(f"{u}: {str(e)}")
             
             if rpc_ok:
-                results.append("✅ Solana RPC: Connected successfully.")
+                results.append("[✓] Solana RPC: Connected successfully.")
             else:
                 success = False
                 err_str = "; ".join(rpc_errors)
-                results.append(f"❌ Solana RPC: Failed ({err_str})")
+                results.append(f"[✗] Solana RPC: Failed ({err_str})")
                 
             # 2. Test Telegram Bot Token
             tg_token_ok = False
@@ -487,11 +827,11 @@ class ConfiguratorApp:
                     if res_json.get("ok"):
                         tg_token_ok = True
                         bot_name = res_json.get("result", {}).get("username", "Bot")
-                        results.append(f"✅ Telegram Bot Token: Valid (@{bot_name}).")
+                        results.append(f"[✓] Telegram Bot Token: Valid (@{bot_name}).")
                     else:
-                        results.append("❌ Telegram Bot Token: Invalid response from API.")
+                        results.append("[✗] Telegram Bot Token: Invalid response from API.")
             except Exception as e:
-                results.append(f"❌ Telegram Bot Token: Failed ({str(e)})")
+                results.append(f"[✗] Telegram Bot Token: Failed ({str(e)})")
                 
             # 3. Test Telegram Chat ID
             if chat_id:
@@ -503,21 +843,21 @@ class ConfiguratorApp:
                         if response.status_code == 200:
                             res_json = response.json()
                             if res_json.get("ok"):
-                                results.append("✅ Telegram Chat ID: Valid (Test message delivered).")
+                                results.append("[✓] Telegram Chat ID: Valid (Test message delivered).")
                             else:
                                 success = False
-                                results.append(f"❌ Telegram Chat ID: Failed to send message ({res_json.get('description')})")
+                                results.append(f"[✗] Telegram Chat ID: Failed to send message ({res_json.get('description')})")
                         else:
                             success = False
-                            results.append(f"❌ Telegram Chat ID: HTTP {response.status_code} ({response.text})")
+                            results.append(f"[✗] Telegram Chat ID: HTTP {response.status_code} ({response.text})")
                     except Exception as e:
                         success = False
-                        results.append(f"❌ Telegram Chat ID: Failed ({str(e)})")
+                        results.append(f"[✗] Telegram Chat ID: Failed ({str(e)})")
                 else:
                     success = False
-                    results.append("❌ Telegram Chat ID: Cannot test (invalid bot token).")
+                    results.append("[✗] Telegram Chat ID: Cannot test (invalid bot token).")
             else:
-                results.append("ℹ️ Telegram Chat ID: Empty (skipped test).")
+                results.append("[i] Telegram Chat ID: Empty (skipped test).")
                 
             # Invoke callback on main thread
             self.root.after(0, lambda: self.show_test_results(success, results))
@@ -746,7 +1086,7 @@ class ConfiguratorApp:
         # Temporary status message showing success
         original_status = self.status_lbl.cget("text")
         original_fg = self.status_lbl.cget("foreground")
-        self.status_lbl.config(text="📋 Address copied to clipboard!", foreground=ACCENT_BLUE)
+        self.status_lbl.config(text="[✓] Address copied to clipboard!", foreground=ACCENT_BLUE)
         self.root.after(2000, lambda: self.status_lbl.config(text=original_status, foreground=original_fg))
 
     # Log View
@@ -881,6 +1221,28 @@ class ConfiguratorApp:
                 
         # Loop every 1 second
         self.root.after(1000, self.check_process)
+
+    def minimize_window(self):
+        self.root.iconify()
+        
+    def toggle_maximize(self):
+        if self.is_maximized:
+            self.root.geometry(self.normal_geom)
+            self.is_maximized = False
+        else:
+            self.normal_geom = self.root.geometry()
+            sw = self.root.winfo_screenwidth()
+            sh = self.root.winfo_screenheight()
+            self.root.geometry(f"{sw}x{sh-40}+0+0")
+            self.is_maximized = True
+
+    def toggle_chat_id_visibility(self):
+        if self.chat_id_entry.cget("show") == "*":
+            self.chat_id_entry.config(show="")
+            self.show_chat_id_btn.config(text="Hide")
+        else:
+            self.chat_id_entry.config(show="*")
+            self.show_chat_id_btn.config(text="Show")
 
     def clean_exit(self):
         self.stop_bot()
