@@ -994,9 +994,12 @@ class ConfiguratorApp:
                 self.in_map_transition = True
                 self.root.withdraw()
                 self.root.deiconify()
-                self.in_map_transition = False
+                self.root.after(100, self.reset_map_transition)
             except Exception:
                 self.in_map_transition = False
+
+    def reset_map_transition(self):
+        self.in_map_transition = False
 
     def on_map(self, event):
         if getattr(self, "in_map_transition", False):
