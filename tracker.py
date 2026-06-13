@@ -90,7 +90,13 @@ def get_default_chat_state():
         "active": True,
         "currency": "USD",
         "interval": 1,
+        "status_interval": 5,
+        "whale_threshold": 1.0,
+        "show_coin_link": True,
+        "show_market_cap": True,
         "last_summary_time": time.time(),
+        "last_status_time": 0.0,
+        "status_txs": [],
         "tracked": {},
         "accumulated_txs": []
     }
@@ -236,6 +242,146 @@ def get_token_metadata(mint):
         
     return f"{mint[:4]}...{mint[-4:]}", 0.0
 
+# Caches for Dexscreener and RugCheck data to avoid rate limits
+dex_market_cache = {}
+rugcheck_cache = {}
+
+def get_dex_market_data(mint):
+    if mint == "So11111111111111111111111111111111111111112":
+        return "https://dexscreener.com/solana/So11111111111111111111111111111111111111112", None
+        
+    now = time.time()
+    if mint in dex_market_cache:
+        cached = dex_market_cache[mint]
+        if now - cached['last_update'] < 300: # 5 min cache
+            return cached['url'], cached['mcap']
+            
+    url = f"https://api.dexscreener.com/latest/dex/tokens/{mint}"
+    try:
+        r = requests.get(url, timeout=5)
+        r.raise_for_status()
+        res = r.json()
+        pairs = res.get("pairs")
+        if pairs and isinstance(pairs, list) and len(pairs) > 0:
+            solana_pairs = [p for p in pairs if p.get("chainId") == "solana"]
+            if solana_pairs:
+                # Sort by liquidity USD descending if present
+                solana_pairs.sort(key=lambda p: p.get("liquidity", {}).get("usd", 0.0), reverse=True)
+                main_pair = solana_pairs[0]
+                
+                pair_url = main_pair.get("url")
+                mcap = main_pair.get("marketCap")
+                if mcap is None:
+                    mcap = main_pair.get("fdv")
+                
+                if not pair_url:
+                    pair_url = f"https://dexscreener.com/solana/{mint}"
+                    
+                dex_market_cache[mint] = {
+                    'url': pair_url,
+                    'mcap': mcap,
+                    'last_update': now
+                }
+                return pair_url, mcap
+    except Exception as e:
+        logger.warning(f"Failed to fetch Dexscreener data for {mint}: {e}")
+        
+    fallback_url = f"https://dexscreener.com/solana/{mint}"
+    return fallback_url, None
+
+def get_rugcheck_report(mint):
+    if mint == "So11111111111111111111111111111111111111112":
+        return {}
+        
+    now = time.time()
+    if mint in rugcheck_cache:
+        cached = rugcheck_cache[mint]
+        if now - cached['last_update'] < 300: # 5 min cache
+            return cached['report']
+            
+    url = f"https://api.rugcheck.xyz/v1/tokens/{mint}/report"
+    try:
+        r = requests.get(url, timeout=8)
+        if r.status_code == 200:
+            report = r.json()
+            rugcheck_cache[mint] = {
+                'report': report,
+                'last_update': now
+            }
+            return report
+    except Exception as e:
+        logger.warning(f"Failed to fetch RugCheck report for {mint}: {e}")
+        
+    return {}
+
+def get_bundled_percentage(report):
+    if not report:
+        return 0.0
+    risks = report.get("risks", [])
+    for r in risks:
+        name = r.get("name", "").lower()
+        if "bundled" in name or "insider" in name:
+            val = r.get("value", "")
+            if "%" in val:
+                try:
+                    return float(val.replace("%", "").strip())
+                except Exception:
+                    pass
+    # Fallback to summing top insider holders
+    top_holders = report.get("topHolders", [])
+    insider_pct = sum(h.get("pct", 0.0) for h in top_holders if h.get("insider") is True)
+    return insider_pct
+
+def get_kol_count(report):
+    if not report:
+        return 0
+    kol_wallets = set()
+    known_accounts = report.get("knownAccounts", {})
+    for acc, details in known_accounts.items():
+        acc_type = details.get("type", "").lower()
+        acc_name = details.get("name", "").lower()
+        if "kol" in acc_type or "kol" in acc_name or "influencer" in acc_type or "influencer" in acc_name:
+            kol_wallets.add(acc)
+            
+    top_holders = report.get("topHolders", [])
+    for h in top_holders:
+        owner = h.get("owner")
+        if owner in known_accounts:
+            details = known_accounts[owner]
+            acc_type = details.get("type", "").lower()
+            acc_name = details.get("name", "").lower()
+            if "kol" in acc_type or "kol" in acc_name or "influencer" in acc_type or "influencer" in acc_name:
+                kol_wallets.add(owner)
+                
+    return len(kol_wallets)
+
+def get_whale_count(report, threshold_pct=1.0):
+    if not report:
+        return 0
+    top_holders = report.get("topHolders", [])
+    whale_count = 0
+    for h in top_holders:
+        pct = h.get("pct", 0.0)
+        if pct >= threshold_pct:
+            whale_count += 1
+    return whale_count
+
+def format_mcap(mcap_value):
+    if mcap_value is None:
+        return "N/A"
+    try:
+        val = float(mcap_value)
+        if val >= 1e9:
+            return f"${val/1e9:,.1f}B"
+        elif val >= 1e6:
+            return f"${val/1e6:,.1f}M"
+        elif val >= 1e3:
+            return f"${val/1e3:,.1f}K"
+        else:
+            return f"${val:,.0f}"
+    except Exception:
+        return "N/A"
+
 def get_fiat_rates():
     now = time.time()
     if now - fiat_rates_cache['last_update'] < 3600 and fiat_rates_cache['rates']:
@@ -319,8 +465,10 @@ def send_help(chat_id):
         "• <code>/remove &lt;address_or_name&gt;</code> - Stop tracking an address/name\n"
         "• <code>/show</code> - List all currently tracked addresses\n"
         "• <code>/balance</code> - Show current balances of all tracked addresses\n"
+        "• <code>/status</code> - Scan and show security details of all tracked wallets\n"
         "• <code>/currency &lt;code&gt;</code> - Change display currency (USD, NIS, CAD, EUR...)\n"
         "• <code>/interval &lt;mins&gt;</code> - Alert summary frequency in minutes (1 = immediate)\n"
+        "• <code>/sinterval &lt;mins&gt;</code> - Status notification frequency in minutes (default is 5)\n"
         "• <code>/export</code> - Download JSON backup of your tracked list\n"
         "• <code>/import</code> - Upload JSON backup (reply to JSON document with /import)\n"
         "• <code>/stop</code> - Pause notifications for this chat\n"
@@ -374,6 +522,166 @@ def format_balance(chat_id):
         
     lines.append(f"<b>Total Value: {format_currency(total_usd_all, currency)}</b>")
     return "\n".join(lines)
+
+def format_status_report(chat_id, clear_after=False):
+    global state
+    with state_lock:
+        chat_data = state.get("chats", {}).get(str(chat_id), {})
+    
+    tracked = chat_data.get("tracked", {})
+    if not tracked:
+        return "No wallets are currently tracked in this chat. Use <code>/add u &lt;address&gt;</code> to start."
+        
+    currency = chat_data.get("currency", "USD")
+    sol_price = get_sol_price()
+    whale_threshold = chat_data.get("whale_threshold", 1.0)
+    show_coin_link = chat_data.get("show_coin_link", True)
+    show_market_cap = chat_data.get("show_market_cap", True)
+    
+    # Extract accumulated transactions for the status interval
+    status_txs = chat_data.get("status_txs", [])
+    
+    lines = []
+    
+    for addr, info in tracked.items():
+        name = info.get("name", addr)
+        # If the name is just the address, show truncated address
+        if name == addr:
+            name = f"{addr[:4]}...{addr[-4:]}"
+            
+        addr_type = info.get("type", "user")
+        
+        solscan_link = f"<a href='https://solscan.io/account/{addr}'>Solscan</a>"
+        lines.append(f"Scan complete for <b>{name}</b> - {solscan_link}")
+        
+        # Aggregate buys/sells of tokens for this wallet since last status interval
+        wallet_txs = [tx for tx in status_txs if tx.get("address") == addr]
+        net_changes = {} # mint -> token_change
+        for tx in wallet_txs:
+            token_changes = tx.get("token_changes", {})
+            for mint, details in token_changes.items():
+                if mint not in net_changes:
+                    net_changes[mint] = 0.0
+                net_changes[mint] += details.get("change", 0.0)
+                
+        # Non-zero token accounts & active scanned tokens
+        tokens_scanned = set()
+        
+        if addr_type == "user":
+            # Show SOL
+            sol_bal = solana_client.get_balance(addr)
+            sol_val_usd = sol_bal * sol_price
+            lines.append(f"  • SOL: {sol_bal:,.4f} SOL ({format_currency(sol_val_usd, currency)})")
+            
+            # Show token balances
+            token_accounts = solana_client.get_token_accounts(addr)
+            if token_accounts:
+                for item in token_accounts.get("value", []):
+                    parsed = item.get("account", {}).get("data", {}).get("parsed", {})
+                    info_node = parsed.get("info", {})
+                    mint = info_node.get("mint")
+                    amount_info = info_node.get("tokenAmount", {})
+                    amount = float(amount_info.get("uiAmount", 0.0))
+                    
+                    if amount > 0.0001:
+                        tokens_scanned.add(mint)
+                        symbol, price = get_token_metadata(mint)
+                        val_usd = amount * price
+                        
+                        # Get RugCheck & Dexscreener data
+                        pair_url, mcap_val = get_dex_market_data(mint)
+                        report = get_rugcheck_report(mint)
+                        bundled_val = get_bundled_percentage(report)
+                        kol_val = get_kol_count(report)
+                        whale_val = get_whale_count(report, whale_threshold)
+                        
+                        mcap_str = format_currency(mcap_val, currency) if mcap_val else "N/A"
+                        
+                        # Coin link
+                        if show_coin_link and pair_url:
+                            symbol_str = f"<a href='{pair_url}'>{symbol}</a>"
+                        else:
+                            symbol_str = symbol
+                            
+                        if show_market_cap:
+                            lines.append(f"  • <b>{symbol_str}</b>: {amount:,.4f} ({format_currency(val_usd, currency)}) [💰 MC: {mcap_str}]")
+                        else:
+                            lines.append(f"  • <b>{symbol_str}</b>: {amount:,.4f} ({format_currency(val_usd, currency)})")
+                            
+                        # Show accumulated trades in this interval
+                        net_tok = net_changes.get(mint, 0.0)
+                        if net_tok > 0.0:
+                            lines.append(f"    📈 bought: +{net_tok:,.2f} {symbol}")
+                        elif net_tok < 0.0:
+                            lines.append(f"    📉 sold: -{abs(net_tok):,.2f} {symbol}")
+                            
+                        lines.append(f"    🚨 Bundled: {bundled_val:.2f}% | 🔑 KOLs: {kol_val} | 🐳 Whales: {whale_val}")
+        else:
+            # Specific token account
+            try:
+                res = solana_client._call("getAccountInfo", [addr, {"encoding": "jsonParsed"}])
+                if res and res.get("value"):
+                    parsed_data = res["value"].get("data", {})
+                    if isinstance(parsed_data, dict) and parsed_data.get("parsed"):
+                        info_node = parsed_data["parsed"].get("info", {})
+                        mint = info_node.get("mint")
+                        amount_info = info_node.get("tokenAmount", {})
+                        amount = float(amount_info.get("uiAmount", 0.0))
+                        
+                        symbol, price = get_token_metadata(mint)
+                        val_usd = amount * price
+                        
+                        pair_url, mcap_val = get_dex_market_data(mint)
+                        report = get_rugcheck_report(mint)
+                        bundled_val = get_bundled_percentage(report)
+                        kol_val = get_kol_count(report)
+                        whale_val = get_whale_count(report, whale_threshold)
+                        
+                        mcap_str = format_currency(mcap_val, currency) if mcap_val else "N/A"
+                        
+                        if show_coin_link and pair_url:
+                            symbol_str = f"<a href='{pair_url}'>{symbol}</a>"
+                        else:
+                            symbol_str = symbol
+                            
+                        if show_market_cap:
+                            lines.append(f"  • <b>{symbol_str}</b>: {amount:,.4f} ({format_currency(val_usd, currency)}) [💰 MC: {mcap_str}]")
+                        else:
+                            lines.append(f"  • <b>{symbol_str}</b>: {amount:,.4f} ({format_currency(val_usd, currency)})")
+                            
+                        # Show accumulated trades in this interval
+                        net_tok = net_changes.get(mint, 0.0)
+                        if net_tok > 0.0:
+                            lines.append(f"    📈 bought: +{net_tok:,.2f} {symbol}")
+                        elif net_tok < 0.0:
+                            lines.append(f"    📉 sold: -{abs(net_tok):,.2f} {symbol}")
+                            
+                        lines.append(f"    🚨 Bundled: {bundled_val:.2f}% | 🔑 KOLs: {kol_val} | 🐳 Whales: {whale_val}")
+            except Exception as e:
+                lines.append(f"  • Failed to read token account info: {e}")
+                
+        lines.append("")
+        
+    if clear_after:
+        with state_lock:
+            # We fetch state from file to prevent concurrent overwrite issues
+            if os.path.exists(STATE_FILE):
+                try:
+                    with open(STATE_FILE, "r") as f:
+                        current_state = json.load(f)
+                except Exception:
+                    current_state = state
+            else:
+                current_state = state
+                
+            cid_str = str(chat_id)
+            if cid_str in current_state.get("chats", {}):
+                current_state["chats"][cid_str]["status_txs"] = []
+                current_state["chats"][cid_str]["last_status_time"] = time.time()
+                state = current_state
+                save_state_unlocked()
+                
+    return "\n".join(lines).strip()
 
 # Export config
 def handle_export(chat_id):
@@ -493,7 +801,7 @@ def handle_import(chat_id, document):
         
     reply_to(chat_id, f"✅ Configuration imported successfully!\n• Currency: <b>{currency}</b>\n• Interval: <b>{interval} minutes</b>\n• Merged <b>{len(valid_tracked)}</b> addresses.")
 
-def format_transaction_group(wallet_name, address, wallet_type, events, currency):
+def format_transaction_group(wallet_name, address, wallet_type, events, currency, show_coin_link=True, show_market_cap=True, whale_threshold=1.0):
     icon = "👛" if wallet_type == "user" else "🧿"
     
     # Group events by token mint
@@ -546,8 +854,33 @@ def format_transaction_group(wallet_name, address, wallet_type, events, currency
             emoji = "🔴"
             action = "sold"
             
-        header = f"{icon} <b>{wallet_name}</b> (<a href='https://solscan.io/account/{address}'>Solscan</a>)"
-        body = f"{emoji} {tx_count} {action}: {abs(tok_change):,.2f} {symbol} ({mint_short}) ({val_str})"
+        # Dexscreener and Rugcheck details
+        pair_url, mcap_val = get_dex_market_data(mint)
+        report = get_rugcheck_report(mint)
+        bundled_val = get_bundled_percentage(report)
+        kol_val = get_kol_count(report)
+        whale_val = get_whale_count(report, whale_threshold)
+        
+        # Coin link
+        if show_coin_link and pair_url:
+            symbol_str = f"<a href='{pair_url}'>{symbol}</a>"
+        else:
+            symbol_str = symbol
+            
+        mcap_str = format_currency(mcap_val, currency) if mcap_val else "N/A"
+        
+        solscan_link = f"<a href='https://solscan.io/account/{address}'>Solscan</a>"
+        header = f"Scan complete for {wallet_name} - {solscan_link}"
+        
+        body_lines = []
+        if show_market_cap:
+            body_lines.append(f"💰 Market Cap: {mcap_str}")
+        body_lines.append(f"{emoji} {action} {abs(tok_change):,.2f} {symbol_str} ({val_str})")
+        body_lines.append(f"🚨 Bundled: {bundled_val:.2f}%")
+        body_lines.append(f"🔑 KOL Count: {kol_val}")
+        body_lines.append(f"🐳 Whale Count: {whale_val}")
+        
+        body = "\n".join(body_lines)
         
         # Build tx list
         tx_lines = []
@@ -556,7 +889,7 @@ def format_transaction_group(wallet_name, address, wallet_type, events, currency
         if len(sigs) > 5:
             tx_lines.append(f"(+{len(sigs) - 5} more)")
             
-        msg = "\n".join([header, body] + tx_lines)
+        msg = "\n".join([header, "", body] + tx_lines)
         messages.append(msg)
         
     # Format SOL only events
@@ -569,8 +902,9 @@ def format_transaction_group(wallet_name, address, wallet_type, events, currency
         emoji = "🟢" if total_sol > 0 else "🔴"
         action = "received" if total_sol > 0 else "sent"
         
-        header = f"{icon} <b>{wallet_name}</b> (<a href='https://solscan.io/account/{address}'>Solscan</a>)"
-        body = f"{emoji} {len(sigs)} {action}: {abs(total_sol):,.4f} SOL ({val_str})"
+        solscan_link = f"<a href='https://solscan.io/account/{address}'>Solscan</a>"
+        header = f"Scan complete for {wallet_name} - {solscan_link}"
+        body = f"{emoji} {action} {abs(total_sol):,.4f} SOL ({val_str})"
         
         tx_lines = []
         for sig in sigs[:5]:
@@ -578,7 +912,7 @@ def format_transaction_group(wallet_name, address, wallet_type, events, currency
         if len(sigs) > 5:
             tx_lines.append(f"(+{len(sigs) - 5} more)")
             
-        msg = "\n".join([header, body] + tx_lines)
+        msg = "\n".join([header, "", body] + tx_lines)
         messages.append(msg)
         
     return messages
@@ -586,12 +920,21 @@ def format_transaction_group(wallet_name, address, wallet_type, events, currency
 # Alert sender
 def send_transaction_alert(chat_id, event, currency):
     wallet_type = "user"
+    show_coin_link = True
+    show_market_cap = True
+    whale_threshold = 1.0
     with state_lock:
         chat_data = state.get("chats", {}).get(str(chat_id), {})
         addr_info = chat_data.get("tracked", {}).get(event["address"], {})
         wallet_type = addr_info.get("type", "user")
+        show_coin_link = chat_data.get("show_coin_link", True)
+        show_market_cap = chat_data.get("show_market_cap", True)
+        whale_threshold = chat_data.get("whale_threshold", 1.0)
         
-    messages = format_transaction_group(event["wallet_name"], event["address"], wallet_type, [event], currency)
+    messages = format_transaction_group(
+        event["wallet_name"], event["address"], wallet_type, [event], currency,
+        show_coin_link=show_coin_link, show_market_cap=show_market_cap, whale_threshold=whale_threshold
+    )
     for msg in messages:
         make_telegram_request("sendMessage", data={
             "chat_id": chat_id,
@@ -607,6 +950,9 @@ def send_chat_summary(chat_id, chat_data):
         return
         
     currency = chat_data.get("currency", "USD")
+    show_coin_link = chat_data.get("show_coin_link", True)
+    show_market_cap = chat_data.get("show_market_cap", True)
+    whale_threshold = chat_data.get("whale_threshold", 1.0)
     
     # Group transactions by wallet address
     wallet_groups = {}
@@ -622,7 +968,10 @@ def send_chat_summary(chat_id, chat_data):
             wallet_type = addr_info.get("type", "user")
             wallet_name = addr_info.get("name", "Unnamed")
             
-        messages = format_transaction_group(wallet_name, addr, wallet_type, events, currency)
+        messages = format_transaction_group(
+            wallet_name, addr, wallet_type, events, currency,
+            show_coin_link=show_coin_link, show_market_cap=show_market_cap, whale_threshold=whale_threshold
+        )
         for msg in messages:
             make_telegram_request("sendMessage", data={
                 "chat_id": chat_id,
@@ -917,6 +1266,34 @@ def handle_telegram_message(msg):
         else:
             reply_to(chat_id, f"⏱️ Interval set to {intv} minutes. Accumulating logs.")
             
+    elif command == "/status":
+        reply_to(chat_id, "⏳ Generating status report and scanning security metrics...")
+        try:
+            report_text = format_status_report(chat_id)
+            reply_to(chat_id, report_text)
+        except Exception as e:
+            logger.error(f"Status report failed: {e}")
+            reply_to(chat_id, "❌ Failed to generate status report.")
+            
+    elif command == "/sinterval":
+        if not args:
+            with state_lock:
+                s_intv = state["chats"][str(chat_id)].get("status_interval", 5)
+            reply_to(chat_id, f"ℹ️ Current status notification interval is set to <b>{s_intv}</b> minutes.")
+            return
+        try:
+            val = int(args[0])
+            if val < 1:
+                raise ValueError()
+        except ValueError:
+            reply_to(chat_id, "❌ Status interval must be a positive integer (at least 1 minute).")
+            return
+        with state_lock:
+            state["chats"][str(chat_id)]["status_interval"] = val
+            state["chats"][str(chat_id)]["last_status_time"] = time.time()
+            save_state_unlocked()
+        reply_to(chat_id, f"✅ Status notification interval updated to <b>{val}</b> minutes.")
+            
     elif command == "/export":
         handle_export(chat_id)
         
@@ -1047,15 +1424,24 @@ def parse_and_dispatch_transaction(address, tx, sig):
                 total_tok_val += abs(tok["change"]) * tok["price_usd"]
             event["value_usd"] = total_tok_val
             
+        # Always accumulate transactions in status_txs for the status interval/scans
+        with state_lock:
+            chat_id_str = str(chat_id)
+            if "status_txs" not in state["chats"][chat_id_str]:
+                state["chats"][chat_id_str]["status_txs"] = []
+            state["chats"][chat_id_str]["status_txs"].append(event)
+            
         interval = chat_data.get("interval", 1)
         if interval == 1:
             send_transaction_alert(chat_id, event, currency)
         else:
             with state_lock:
-                if "accumulated_txs" not in state["chats"][str(chat_id)]:
-                    state["chats"][str(chat_id)]["accumulated_txs"] = []
-                state["chats"][str(chat_id)]["accumulated_txs"].append(event)
-                save_state_unlocked()
+                if "accumulated_txs" not in state["chats"][chat_id_str]:
+                    state["chats"][chat_id_str]["accumulated_txs"] = []
+                state["chats"][chat_id_str]["accumulated_txs"].append(event)
+                
+        with state_lock:
+            save_state_unlocked()
 
 failed_sigs_cache = {}
 
@@ -1135,35 +1521,43 @@ def solana_poller_loop():
         time.sleep(25)
 
 def summary_scheduler_loop():
-    logger.info("Summary scheduler thread started.")
+    logger.info("Summary/Status scheduler thread started.")
     global state
     while True:
         try:
             load_state()
             now = time.time()
-            chats_to_process = []
+            chats_for_summary = []
+            chats_for_status = []
             
             with state_lock:
                 for chat_id, chat_data in state.get("chats", {}).items():
                     if not chat_data.get("active", True):
                         continue
+                        
+                    # 1. Summary logic check
                     interval = chat_data.get("interval", 1)
-                    if interval == 1:
-                        continue
+                    if interval > 1:
+                        cooldown = interval * 60
+                        last_summary = chat_data.get("last_summary_time", 0.0)
+                        if last_summary == 0.0:
+                            state["chats"][chat_id]["last_summary_time"] = now
+                        elif now - last_summary >= cooldown:
+                            chats_for_summary.append((chat_id, chat_data))
+                            
+                    # 2. Status logic check
+                    s_interval = chat_data.get("status_interval", 5)
+                    last_status = chat_data.get("last_status_time", 0.0)
+                    if last_status == 0.0:
+                        state["chats"][chat_id]["last_status_time"] = 1.0
+                        save_state_unlocked()
+                    elif now - last_status >= s_interval * 60:
+                        chats_for_status.append(chat_id)
                         
-                    cooldown = interval * 60
-                    
-                    last_summary = chat_data.get("last_summary_time", 0.0)
-                    if last_summary == 0.0:
-                        state["chats"][chat_id]["last_summary_time"] = now
-                        continue
-                    if now - last_summary >= cooldown:
-                        chats_to_process.append((chat_id, chat_data))
-                        
-            for chat_id, chat_data in chats_to_process:
+            # Process scheduled summaries
+            for chat_id, chat_data in chats_for_summary:
                 txs_to_send = list(chat_data.get("accumulated_txs", []))
                 if not txs_to_send:
-                    # Update summary time even if no txs to prevent loop spinning
                     with state_lock:
                         state["chats"][str(chat_id)]["last_summary_time"] = now
                         save_state_unlocked()
@@ -1172,7 +1566,6 @@ def summary_scheduler_loop():
                 send_chat_summary(chat_id, chat_data)
                 
                 with state_lock:
-                    # Reload latest state from file to preserve concurrent updates
                     if os.path.exists(STATE_FILE):
                         try:
                             with open(STATE_FILE, "r") as f:
@@ -1185,7 +1578,6 @@ def summary_scheduler_loop():
                     chat_state = current_state.get("chats", {}).get(str(chat_id), {})
                     current_txs = chat_state.get("accumulated_txs", [])
                     
-                    # Remove only the transactions we successfully sent
                     sent_sigs = {tx["sig"] for tx in txs_to_send}
                     remaining_txs = [tx for tx in current_txs if tx["sig"] not in sent_sigs]
                     
@@ -1193,6 +1585,31 @@ def summary_scheduler_loop():
                     state["chats"][str(chat_id)]["last_summary_time"] = now
                     state["chats"][str(chat_id)]["accumulated_txs"] = remaining_txs
                     save_state_unlocked()
+                    
+            # Process scheduled status scans
+            for chat_id in chats_for_status:
+                try:
+                    report_text = format_status_report(chat_id, clear_after=True)
+                    if report_text:
+                        reply_to(chat_id, report_text)
+                except Exception as e:
+                    logger.error(f"Scheduled status report failed for chat {chat_id}: {e}")
+                    # Prevent spinning if report repeatedly fails
+                    with state_lock:
+                        if os.path.exists(STATE_FILE):
+                            try:
+                                with open(STATE_FILE, "r") as f:
+                                    current_state = json.load(f)
+                            except Exception:
+                                current_state = state
+                        else:
+                            current_state = state
+                        cid_str = str(chat_id)
+                        if cid_str in current_state.get("chats", {}):
+                            current_state["chats"][cid_str]["last_status_time"] = time.time()
+                            state = current_state
+                            save_state_unlocked()
+                            
         except Exception as e:
             logger.error(f"Error in summary scheduler: {e}")
             

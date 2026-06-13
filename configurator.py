@@ -260,7 +260,54 @@ class ConfiguratorApp:
         
         # Save Preferences Button
         save_pref_btn = ttk.Button(pref_inner, text="Save Preferences", style="Blue.TButton", command=self.save_preferences)
-        save_pref_btn.grid(row=1, column=4, padx=(20, 0))
+        save_pref_btn.grid(row=1, column=4, rowspan=2, padx=(20, 0), sticky=tk.NS)
+        
+        # Status Interval
+        ttk.Label(pref_inner, text="Status Interval:", background=BG_CARD, foreground=TEXT_COLOR).grid(row=2, column=0, sticky=tk.W)
+        self.status_interval_var = tk.StringVar(value=str(self.get_chat_pref("status_interval", 5)))
+        status_intervals = ["1", "5", "10", "15", "30", "60"]
+        self.status_interval_menu = ttk.Combobox(pref_inner, textvariable=self.status_interval_var, values=status_intervals, width=10, state="readonly")
+        self.status_interval_menu.grid(row=2, column=1, sticky=tk.EW, padx=10, pady=5)
+        
+        # Whale Threshold
+        ttk.Label(pref_inner, text="Whale Threshold (%):", background=BG_CARD, foreground=TEXT_COLOR).grid(row=2, column=2, sticky=tk.W)
+        self.whale_threshold_var = tk.StringVar(value=str(self.get_chat_pref("whale_threshold", 1.0)))
+        self.whale_threshold_entry = tk.Entry(pref_inner, textvariable=self.whale_threshold_var, bg=BG_MAIN, fg=TEXT_COLOR, insertbackground=TEXT_COLOR, bd=1, relief=tk.SOLID, width=12)
+        self.whale_threshold_entry.grid(row=2, column=3, sticky=tk.EW, padx=10, pady=5)
+        
+        # Show Coin Link Checkbox
+        self.show_coin_link_var = tk.BooleanVar(value=self.get_chat_pref("show_coin_link", True))
+        self.show_coin_link_check = tk.Checkbutton(
+            pref_inner,
+            text="Show Coin Link (Dexscreener)",
+            variable=self.show_coin_link_var,
+            bg=BG_CARD,
+            fg=TEXT_COLOR,
+            selectcolor=BG_MAIN,
+            activebackground=BG_CARD,
+            activeforeground=TEXT_COLOR,
+            font=("Helvetica", 10),
+            bd=0,
+            highlightthickness=0
+        )
+        self.show_coin_link_check.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+        
+        # Show Market Cap Checkbox
+        self.show_market_cap_var = tk.BooleanVar(value=self.get_chat_pref("show_market_cap", True))
+        self.show_market_cap_check = tk.Checkbutton(
+            pref_inner,
+            text="Show Market Cap",
+            variable=self.show_market_cap_var,
+            bg=BG_CARD,
+            fg=TEXT_COLOR,
+            selectcolor=BG_MAIN,
+            activebackground=BG_CARD,
+            activeforeground=TEXT_COLOR,
+            font=("Helvetica", 10),
+            bd=0,
+            highlightthickness=0
+        )
+        self.show_market_cap_check.grid(row=3, column=2, columnspan=2, sticky=tk.W, pady=(5, 0))
         
         # Auto-start Service Checkbox
         self.auto_start_var = tk.BooleanVar(value=(self.auto_start == "true"))
@@ -277,7 +324,7 @@ class ConfiguratorApp:
             bd=0,
             highlightthickness=0
         )
-        self.auto_start_check.grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(5, 0))
+        self.auto_start_check.grid(row=4, column=0, columnspan=4, sticky=tk.W, pady=(5, 0))
         
         pref_inner.columnconfigure(1, weight=1)
         pref_inner.columnconfigure(3, weight=1)
@@ -618,7 +665,13 @@ class ConfiguratorApp:
                         "active": True,
                         "currency": "USD",
                         "interval": 1,
+                        "status_interval": 5,
+                        "whale_threshold": 1.0,
+                        "show_coin_link": True,
+                        "show_market_cap": True,
                         "last_summary_time": time.time() if "time" in sys.modules else 0.0,
+                        "last_status_time": 0.0,
+                        "status_txs": [],
                         "tracked": {},
                         "accumulated_txs": []
                     }
@@ -637,7 +690,33 @@ class ConfiguratorApp:
             return
             
         curr = self.currency_var.get()
-        intv = int(self.interval_var.get())
+        
+        try:
+            intv = int(self.interval_var.get())
+            if intv < 1:
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror("Validation Error", "Summary Interval must be a positive integer.")
+            return
+            
+        try:
+            s_intv = int(self.status_interval_var.get())
+            if s_intv < 1:
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror("Validation Error", "Status Interval must be a positive integer.")
+            return
+            
+        try:
+            w_thresh = float(self.whale_threshold_var.get())
+            if w_thresh <= 0.0:
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror("Validation Error", "Whale Threshold must be a positive number.")
+            return
+            
+        show_link = self.show_coin_link_var.get()
+        show_mcap = self.show_market_cap_var.get()
         auto_start_val = "true" if self.auto_start_var.get() else "false"
         
         self.auto_start = auto_start_val
@@ -661,6 +740,12 @@ class ConfiguratorApp:
                 "active": True,
                 "currency": "USD",
                 "interval": 1,
+                "status_interval": 5,
+                "whale_threshold": 1.0,
+                "show_coin_link": True,
+                "show_market_cap": True,
+                "last_status_time": 0.0,
+                "status_txs": [],
                 "tracked": {},
                 "accumulated_txs": []
             }
@@ -669,6 +754,10 @@ class ConfiguratorApp:
             
         self.state["chats"][chat_id_str]["currency"] = curr
         self.state["chats"][chat_id_str]["interval"] = intv
+        self.state["chats"][chat_id_str]["status_interval"] = s_intv
+        self.state["chats"][chat_id_str]["whale_threshold"] = w_thresh
+        self.state["chats"][chat_id_str]["show_coin_link"] = show_link
+        self.state["chats"][chat_id_str]["show_market_cap"] = show_mcap
         self.save_state()
         messagebox.showinfo("Success", "Preferences saved successfully.")
 
@@ -835,7 +924,7 @@ class ConfiguratorApp:
                             if "tracked" not in self.state["chats"][cid]:
                                 self.state["chats"][cid]["tracked"] = {}
                             self.state["chats"][cid]["tracked"].update(cdata["tracked"])
-                        for k in ("currency", "interval", "active"):
+                        for k in ("currency", "interval", "active", "status_interval", "whale_threshold", "show_coin_link", "show_market_cap"):
                             if k in cdata:
                                 self.state["chats"][cid][k] = cdata[k]
                                 
