@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-06-13
+
+### Fixed
+- **Windows Taskbar Visibility**: Patched the borderless window (`overrideredirect`) logic on Windows to register it with the OS taskbar so it can be focused/selected.
+- **Topmost Modal Focus**: Added topmost layers, window raising (`lift()`), and input focus checks on all borderless modal dialog windows to prevent them from rendering behind the parent window and freezing inputs.
+
 ## [1.1.1] - 2026-06-13
 
 ### Fixed

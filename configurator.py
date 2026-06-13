@@ -38,6 +38,19 @@ class ConfiguratorApp:
         self.root.overrideredirect(True)
         self.root.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
         
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
+                style = ctypes.windll.user32.GetWindowLongW(hwnd, -20)  # GWL_EXSTYLE
+                style = style & ~0x00000080  # Remove WS_EX_TOOLWINDOW
+                style = style | 0x00040000   # Add WS_EX_APPWINDOW
+                ctypes.windll.user32.SetWindowLongW(hwnd, -20, style)
+                self.root.withdraw()
+                self.root.deiconify()
+            except Exception:
+                pass
+        
         # Custom messagebox wrapper
         global messagebox
         messagebox = MessageBoxWrapper(self.root)

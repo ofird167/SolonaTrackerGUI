@@ -31,6 +31,9 @@ class CustomMessageDialog(tk.Toplevel):
         x = px + (pw - dw) // 2
         y = py + (ph - dh) // 2
         self.geometry(f"+{x}+{y}")
+        self.lift()
+        self.attributes("-topmost", True)
+        self.focus_force()
         
         # Title bar
         title_bar = tk.Frame(self, bg=BG_CARD, height=30)
@@ -127,6 +130,9 @@ class CustomConfirmDialog(tk.Toplevel):
         x = px + (pw - dw) // 2
         y = py + (ph - dh) // 2
         self.geometry(f"+{x}+{y}")
+        self.lift()
+        self.attributes("-topmost", True)
+        self.focus_force()
         
         # Title bar
         title_bar = tk.Frame(self, bg=BG_CARD, height=30)
@@ -222,6 +228,9 @@ class CustomAddAddressDialog(tk.Toplevel):
         x = px + (pw - dw) // 2
         y = py + (ph - dh) // 2
         self.geometry(f"+{x}+{y}")
+        self.lift()
+        self.attributes("-topmost", True)
+        self.focus_force()
         
         # Custom Title Bar
         title_bar = tk.Frame(self, bg=BG_CARD, height=30)
