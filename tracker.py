@@ -795,20 +795,56 @@ def handle_telegram_message(msg):
             reply_to(chat_id, f"❌ Address or custom name '<code>{target}</code>' is not tracked in this chat.")
                 
     elif command == "/name":
-        if len(args) < 2:
-            reply_to(chat_id, "❌ Usage: <code>/name &lt;address&gt; &lt;custom_name&gt;</code>")
+        if not args:
+            reply_to(chat_id, "❌ Usage: <code>/name &lt;address_or_current_name&gt; &lt;new_name&gt;</code>")
             return
-        address = args[0]
-        name = " ".join(args[1:])
+            
+        full_args_str = " ".join(args).strip()
+        
         with state_lock:
             chat_data = state["chats"][str(chat_id)]
             tracked = chat_data.get("tracked", {})
-            if address in tracked:
-                tracked[address]["name"] = name
-                save_state_unlocked()
-                reply_to(chat_id, f"✏️ Wallet renamed to <b>{name}</b>.")
-            else:
-                reply_to(chat_id, "❌ Address not tracked in this chat.")
+            
+            target_addr = None
+            new_name = None
+            
+            # Scenario 1: First argument is a direct Solana address in tracked
+            first_arg = args[0]
+            if first_arg in tracked and len(args) > 1:
+                target_addr = first_arg
+                new_name = " ".join(args[1:]).strip()
+            
+            # Scenario 2: Find a matching current nickname at the start of the argument string
+            if not target_addr:
+                # Sort tracked names by length descending to match longest nickname first
+                sorted_wallets = sorted(
+                    tracked.items(),
+                    key=lambda item: len(item[1].get("name", "")),
+                    reverse=True
+                )
+                for addr, info in sorted_wallets:
+                    current_name = info.get("name", "").strip()
+                    if not current_name:
+                        continue
+                    pattern = r"^" + re.escape(current_name) + r"(?:\s+(.*))?$"
+                    match = re.match(pattern, full_args_str, re.IGNORECASE)
+                    if match:
+                        target_addr = addr
+                        new_name = match.group(1).strip() if match.group(1) else ""
+                        break
+                        
+            if not target_addr:
+                reply_to(chat_id, "❌ Could not find a tracked wallet matching the address or current nickname provided.")
+                return
+                
+            if not new_name:
+                reply_to(chat_id, "❌ Usage: <code>/name &lt;address_or_current_name&gt; &lt;new_name&gt;</code>")
+                return
+                
+            tracked[target_addr]["name"] = new_name
+            save_state_unlocked()
+            
+        reply_to(chat_id, f"✏️ Wallet renamed to <b>{new_name}</b>.")
                 
     elif command == "/show":
         with state_lock:
