@@ -7,7 +7,7 @@ import subprocess
 import threading
 import requests
 import tkinter as tk
-from tkinter import ttk, simpledialog
+from tkinter import ttk, simpledialog, filedialog
 
 messagebox = None
 
@@ -18,327 +18,14 @@ ENV_PATH = os.path.join(BASE_DIR, "secrets", ".env")
 STATE_PATH = os.path.join(BASE_DIR, "secrets", "tracked.json")
 LOG_PATH = os.path.join(BASE_DIR, "logs", "tracker.log")
 
-# Colors
-BG_MAIN = "#121214"
-BG_CARD = "#1a1a1e"
-TEXT_COLOR = "#e1e1e6"
-TEXT_MUTED = "#8d8d99"
-ACCENT_GREEN = "#10b981"
-ACCENT_BLUE = "#3b82f6"
-ACCENT_RED = "#ef4444"
-BORDER_COLOR = "#29292e"
-
-# Application Base64 GIF Icon (16x16 blue circle)
-APP_ICON_BASE64 = (
-    "R0lGODlhEAAQAPMAAAAAAP///wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-    "ACH5BAEAAAEALAAAAAAQABAAQAM4CLrc/jDKKau9OAuyNu/gGBhCgG3MYKaGia5rurbtGMR0LNf2fed2"
-    "D+R8OBwuh8TksIhMDovEYBEIADs="
+from gui_styles import (
+    BG_MAIN, BG_CARD, TEXT_COLOR, TEXT_MUTED,
+    ACCENT_GREEN, ACCENT_BLUE, ACCENT_RED, BORDER_COLOR,
+    APP_ICON_BASE64, setup_styles
 )
-
-class CustomMessageDialog(tk.Toplevel):
-    def __init__(self, parent, title, message, dialog_type="info"):
-        super().__init__(parent)
-        self.title(title)
-        self.geometry("400x180")
-        self.resizable(False, False)
-        self.configure(bg=BG_MAIN)
-        self.transient(parent)
-        self.grab_set()
-        
-        # Border
-        self.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
-        self.overrideredirect(True)
-        
-        # Center dialog
-        self.update_idletasks()
-        pw = parent.winfo_width()
-        ph = parent.winfo_height()
-        px = parent.winfo_rootx()
-        py = parent.winfo_rooty()
-        dw = self.winfo_width()
-        dh = self.winfo_height()
-        x = px + (pw - dw) // 2
-        y = py + (ph - dh) // 2
-        self.geometry(f"+{x}+{y}")
-        
-        # Title bar
-        title_bar = tk.Frame(self, bg=BG_CARD, height=30)
-        title_bar.pack(fill=tk.X, side=tk.TOP)
-        
-        lbl_title = tk.Label(title_bar, text=title, bg=BG_CARD, fg=TEXT_COLOR, font=("Helvetica", 9, "bold"))
-        lbl_title.pack(side=tk.LEFT, padx=10)
-        
-        btn_close = tk.Button(
-            title_bar, 
-            text="✕", 
-            bg=BG_CARD, 
-            fg=TEXT_MUTED, 
-            activebackground=ACCENT_RED, 
-            activeforeground="#ffffff", 
-            bd=0, 
-            font=("Helvetica", 9), 
-            command=self.destroy,
-            width=3,
-            relief=tk.FLAT
-        )
-        btn_close.pack(side=tk.RIGHT, fill=tk.Y)
-        btn_close.bind("<Enter>", lambda e: btn_close.config(bg=ACCENT_RED, fg="#ffffff"))
-        btn_close.bind("<Leave>", lambda e: btn_close.config(bg=BG_CARD, fg=TEXT_MUTED))
-        
-        # Dragging logic
-        def start_move(e):
-            self.x = e.x
-            self.y = e.y
-        def drag(e):
-            deltax = e.x - self.x
-            deltay = e.y - self.y
-            self.geometry(f"+{self.winfo_x() + deltax}+{self.winfo_y() + deltay}")
-        title_bar.bind("<ButtonPress-1>", start_move)
-        title_bar.bind("<B1-Motion>", drag)
-        lbl_title.bind("<ButtonPress-1>", start_move)
-        lbl_title.bind("<B1-Motion>", drag)
-        
-        # Symbols mapping to avoid emoji box issues on Linux
-        color_map = {
-            "info": ACCENT_BLUE,
-            "error": ACCENT_RED,
-            "warning": "#fbbf24"
-        }
-        symbol_map = {
-            "info": "[i]",
-            "error": "[!]",
-            "warning": "[!]"
-        }
-        accent_color = color_map.get(dialog_type, ACCENT_BLUE)
-        accent_symbol = symbol_map.get(dialog_type, "[i]")
-        
-        content_frame = tk.Frame(self, bg=BG_MAIN)
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=15)
-        
-        lbl_icon = tk.Label(content_frame, text=accent_symbol, bg=BG_MAIN, fg=accent_color, font=("Courier", 18, "bold"))
-        lbl_icon.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 15))
-        
-        msg_lbl = tk.Label(content_frame, text=message, bg=BG_MAIN, fg=TEXT_COLOR, justify=tk.LEFT, font=("Helvetica", 10), wraplength=300)
-        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.W)
-        
-        btn_frame = tk.Frame(self, bg=BG_MAIN, pady=10)
-        btn_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        
-        btn_ok = ttk.Button(btn_frame, text="OK", style="Blue.TButton", command=self.destroy, width=10)
-        btn_ok.pack(anchor=tk.CENTER)
-        
-        self.bind("<Return>", lambda e: self.destroy())
-        self.bind("<Escape>", lambda e: self.destroy())
-
-class CustomConfirmDialog(tk.Toplevel):
-    def __init__(self, parent, title, message):
-        super().__init__(parent)
-        self.title(title)
-        self.geometry("400x180")
-        self.resizable(False, False)
-        self.configure(bg=BG_MAIN)
-        self.transient(parent)
-        self.grab_set()
-        self.result = False
-        
-        # Border
-        self.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
-        self.overrideredirect(True)
-        
-        # Center dialog
-        self.update_idletasks()
-        pw = parent.winfo_width()
-        ph = parent.winfo_height()
-        px = parent.winfo_rootx()
-        py = parent.winfo_rooty()
-        dw = self.winfo_width()
-        dh = self.winfo_height()
-        x = px + (pw - dw) // 2
-        y = py + (ph - dh) // 2
-        self.geometry(f"+{x}+{y}")
-        
-        # Title bar
-        title_bar = tk.Frame(self, bg=BG_CARD, height=30)
-        title_bar.pack(fill=tk.X, side=tk.TOP)
-        
-        lbl_title = tk.Label(title_bar, text=title, bg=BG_CARD, fg=TEXT_COLOR, font=("Helvetica", 9, "bold"))
-        lbl_title.pack(side=tk.LEFT, padx=10)
-        
-        # Dragging logic
-        def start_move(e):
-            self.x = e.x
-            self.y = e.y
-        def drag(e):
-            deltax = e.x - self.x
-            deltay = e.y - self.y
-            self.geometry(f"+{self.winfo_x() + deltax}+{self.winfo_y() + deltay}")
-        title_bar.bind("<ButtonPress-1>", start_move)
-        title_bar.bind("<B1-Motion>", drag)
-        lbl_title.bind("<ButtonPress-1>", start_move)
-        lbl_title.bind("<B1-Motion>", drag)
-        
-        content_frame = tk.Frame(self, bg=BG_MAIN)
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=15)
-        
-        lbl_icon = tk.Label(content_frame, text="[?]", bg=BG_MAIN, fg=ACCENT_BLUE, font=("Courier", 18, "bold"))
-        lbl_icon.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 15))
-        
-        msg_lbl = tk.Label(content_frame, text=message, bg=BG_MAIN, fg=TEXT_COLOR, justify=tk.LEFT, font=("Helvetica", 10), wraplength=300)
-        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.W)
-        
-        btn_frame = tk.Frame(self, bg=BG_MAIN, pady=10)
-        btn_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        
-        btn_no = ttk.Button(btn_frame, text="No", style="Gray.TButton", command=self.on_no, width=10)
-        btn_no.pack(side=tk.RIGHT, padx=(5, 20))
-        
-        btn_yes = ttk.Button(btn_frame, text="Yes", style="Blue.TButton", command=self.on_yes, width=10)
-        btn_yes.pack(side=tk.RIGHT)
-        
-        self.bind("<Return>", lambda e: self.on_yes())
-        self.bind("<Escape>", lambda e: self.on_no())
-        
-    def on_yes(self):
-        self.result = True
-        self.destroy()
-        
-    def on_no(self):
-        self.result = False
-        self.destroy()
-
-class MessageBoxWrapper:
-    def __init__(self, root):
-        self.root = root
-        
-    def showinfo(self, title, message):
-        CustomMessageDialog(self.root, title, message, "info")
-        
-    def showerror(self, title, message):
-        CustomMessageDialog(self.root, title, message, "error")
-        
-    def showwarning(self, title, message):
-        CustomMessageDialog(self.root, title, message, "warning")
-        
-    def askyesno(self, title, message):
-        dialog = CustomConfirmDialog(self.root, title, message)
-        self.root.wait_window(dialog)
-        return dialog.result
-
-class CustomAddAddressDialog(tk.Toplevel):
-    def __init__(self, parent, addr_type, title="Add Tracked Address"):
-        super().__init__(parent)
-        self.title(title)
-        self.geometry("450x245")
-        self.resizable(False, False)
-        self.configure(bg=BG_MAIN)
-        self.transient(parent)
-        self.grab_set()
-        
-        # Border and borderless
-        self.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
-        self.overrideredirect(True)
-        
-        self.addr_type = addr_type
-        self.result = None
-        
-        self.update_idletasks()
-        pw = parent.winfo_width()
-        ph = parent.winfo_height()
-        px = parent.winfo_rootx()
-        py = parent.winfo_rooty()
-        dw = self.winfo_width()
-        dh = self.winfo_height()
-        x = px + (pw - dw) // 2
-        y = py + (ph - dh) // 2
-        self.geometry(f"+{x}+{y}")
-        
-        # Custom Title Bar
-        title_bar = tk.Frame(self, bg=BG_CARD, height=30)
-        title_bar.pack(fill=tk.X, side=tk.TOP)
-        
-        lbl_title_bar = tk.Label(title_bar, text=title, bg=BG_CARD, fg=TEXT_COLOR, font=("Helvetica", 9, "bold"))
-        lbl_title_bar.pack(side=tk.LEFT, padx=10)
-        
-        btn_close = tk.Button(
-            title_bar, 
-            text="✕", 
-            bg=BG_CARD, 
-            fg=TEXT_MUTED, 
-            activebackground=ACCENT_RED, 
-            activeforeground="#ffffff", 
-            bd=0, 
-            font=("Helvetica", 9), 
-            command=self.destroy,
-            width=3,
-            relief=tk.FLAT
-        )
-        btn_close.pack(side=tk.RIGHT, fill=tk.Y)
-        btn_close.bind("<Enter>", lambda e: btn_close.config(bg=ACCENT_RED, fg="#ffffff"))
-        btn_close.bind("<Leave>", lambda e: btn_close.config(bg=BG_CARD, fg=TEXT_MUTED))
-        
-        # Dragging logic
-        def start_move(e):
-            self.x = e.x
-            self.y = e.y
-        def drag(e):
-            deltax = e.x - self.x
-            deltay = e.y - self.y
-            self.geometry(f"+{self.winfo_x() + deltax}+{self.winfo_y() + deltay}")
-        title_bar.bind("<ButtonPress-1>", start_move)
-        title_bar.bind("<B1-Motion>", drag)
-        lbl_title_bar.bind("<ButtonPress-1>", start_move)
-        lbl_title_bar.bind("<B1-Motion>", drag)
-        
-        # Main form UI
-        lbl_title = ttk.Label(self, text=f"Add {'User Wallet' if addr_type == 'user' else 'Token Account'}", font=("Helvetica", 12, "bold"), background=BG_MAIN, foreground=TEXT_COLOR)
-        lbl_title.pack(anchor=tk.W, padx=20, pady=(15, 10))
-        
-        form_frame = tk.Frame(self, bg=BG_MAIN)
-        form_frame.pack(fill=tk.X, padx=20, pady=5)
-        
-        ttk.Label(form_frame, text="Solana Address:", background=BG_MAIN, foreground=TEXT_COLOR).grid(row=0, column=0, sticky=tk.W, pady=5)
-        self.addr_var = tk.StringVar()
-        self.addr_entry = tk.Entry(form_frame, textvariable=self.addr_var, bg=BG_CARD, fg=TEXT_COLOR, insertbackground=TEXT_COLOR, bd=1, relief=tk.SOLID, width=35)
-        self.addr_entry.grid(row=0, column=1, padx=(10, 0), pady=5)
-        self.addr_entry.focus()
-        
-        ttk.Label(form_frame, text="Custom Name:", background=BG_MAIN, foreground=TEXT_COLOR).grid(row=1, column=0, sticky=tk.W, pady=5)
-        self.name_var = tk.StringVar()
-        self.name_entry = tk.Entry(form_frame, textvariable=self.name_var, bg=BG_CARD, fg=TEXT_COLOR, insertbackground=TEXT_COLOR, bd=1, relief=tk.SOLID, width=35)
-        self.name_entry.grid(row=1, column=1, padx=(10, 0), pady=5)
-        
-        self.err_lbl = ttk.Label(form_frame, text="", background=BG_MAIN, foreground=ACCENT_RED, font=("Helvetica", 8))
-        self.err_lbl.grid(row=2, column=1, sticky=tk.W, padx=(10, 0))
-        
-        btn_frame = tk.Frame(self, bg=BG_MAIN)
-        btn_frame.pack(fill=tk.X, padx=20, pady=(15, 0), side=tk.BOTTOM)
-        
-        btn_cancel = ttk.Button(btn_frame, text="Cancel", style="Gray.TButton", command=self.destroy, width=10)
-        btn_cancel.pack(side=tk.RIGHT, padx=(5, 0))
-        
-        btn_add = ttk.Button(btn_frame, text="Add", style="Green.TButton", command=self.validate_and_submit, width=10)
-        btn_add.pack(side=tk.RIGHT)
-        
-        self.bind("<Return>", lambda e: self.validate_and_submit())
-        self.bind("<Escape>", lambda e: self.destroy())
-
-    def validate_and_submit(self):
-        address = self.addr_var.get().strip()
-        name = self.name_var.get().strip()
-        
-        if not address:
-            self.err_lbl.config(text="Address cannot be empty.")
-            return
-            
-        if not re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", address):
-            self.err_lbl.config(text="Invalid Solana address format.")
-            return
-            
-        if not name:
-            name = f"{address[:4]}...{address[-4:]}"
-            
-        self.result = (address, name)
-        self.destroy()
+from gui_dialogs import (
+    CustomMessageDialog, CustomConfirmDialog, MessageBoxWrapper, CustomAddAddressDialog
+)
 
 class ConfiguratorApp:
     def __init__(self, root):
@@ -363,7 +50,7 @@ class ConfiguratorApp:
         self.state = self.load_state_values()
         
         # Create UI
-        self.setup_styles()
+        setup_styles()
         self.build_ui()
         
         # Process monitor loop
@@ -378,31 +65,6 @@ class ConfiguratorApp:
                     self.state["chats"][chat_id_str]["active"] = True
                     self.save_state()
             self.root.after(500, self.start_bot)
-
-    def setup_styles(self):
-        style = ttk.Style()
-        style.theme_use("clam")
-        
-        # Configure overall widget properties
-        style.configure(".", bg=BG_MAIN, fg=TEXT_COLOR, font=("Helvetica", 10))
-        
-        # Card style
-        style.configure("Card.TFrame", background=BG_CARD, bordercolor=BORDER_COLOR, relief="solid", borderwidth=1)
-        style.configure("CardLabel.TLabel", background=BG_CARD, foreground=TEXT_COLOR, font=("Helvetica", 10, "bold"))
-        style.configure("Header.TLabel", background=BG_MAIN, foreground=ACCENT_GREEN, font=("Helvetica", 16, "bold"))
-        
-        # Buttons
-        style.configure("Green.TButton", background=ACCENT_GREEN, foreground="#ffffff", font=("Helvetica", 10, "bold"), borderwidth=0)
-        style.map("Green.TButton", background=[("active", "#059669")])
-        
-        style.configure("Blue.TButton", background=ACCENT_BLUE, foreground="#ffffff", font=("Helvetica", 10, "bold"), borderwidth=0)
-        style.map("Blue.TButton", background=[("active", "#2563eb")])
-        
-        style.configure("Red.TButton", background=ACCENT_RED, foreground="#ffffff", font=("Helvetica", 10, "bold"), borderwidth=0)
-        style.map("Red.TButton", background=[("active", "#dc2626")])
-        
-        style.configure("Gray.TButton", background="#3e3e42", foreground=TEXT_COLOR, font=("Helvetica", 10), borderwidth=0)
-        style.map("Gray.TButton", background=[("active", "#4e4e54")])
 
     def build_ui(self):
         # Custom Title Bar
@@ -496,37 +158,31 @@ class ConfiguratorApp:
         # Configure min size of root window
         self.root.minsize(800, 600)
         
-        # Create Canvas and Scrollbar for vertical scrolling
-        self.canvas = tk.Canvas(self.root, bg=BG_MAIN, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
+        # Main Container Frame
+        self.main_container = tk.Frame(self.root, bg=BG_MAIN, padx=15, pady=10)
+        self.main_container.pack(fill=tk.BOTH, expand=True)
         
-        self.main_container = tk.Frame(self.canvas, bg=BG_MAIN, padx=20, pady=15)
-        
-        # Configure canvas window
-        self.canvas_frame_id = self.canvas.create_window((0, 0), window=self.main_container, anchor="nw")
-        
-        # Bind events for scrolling and resizing
-        self.main_container.bind("<Configure>", self._on_frame_configure)
-        self.canvas.bind("<Configure>", self._on_canvas_configure)
-        
-        # Bind mouse wheel (cross-platform)
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-4>", self._on_mousewheel)
-        self.canvas.bind_all("<Button-5>", self._on_mousewheel)
-        
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        
-        # Pack canvas and scrollbar
-        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        # 1. Header Title
+        # Header Title
         title_lbl = ttk.Label(self.main_container, text="🧿 Solana Wallet Tracker Panel", style="Header.TLabel")
-        title_lbl.pack(anchor=tk.W, pady=(0, 15))
+        title_lbl.pack(anchor=tk.W, pady=(0, 10))
         
-        # 2. Connection Settings Card
-        conn_card = ttk.Frame(self.main_container, style="Card.TFrame")
-        conn_card.pack(fill=tk.X, pady=(0, 15), padx=1)
+        # Notebook Tab Container
+        self.notebook = ttk.Notebook(self.main_container)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+        
+        self.tab_settings = tk.Frame(self.notebook, bg=BG_MAIN, padx=10, pady=10)
+        self.tab_wallets = tk.Frame(self.notebook, bg=BG_MAIN, padx=10, pady=10)
+        self.tab_logs = tk.Frame(self.notebook, bg=BG_MAIN, padx=10, pady=10)
+        self.tab_backup = tk.Frame(self.notebook, bg=BG_MAIN, padx=10, pady=10)
+        
+        self.notebook.add(self.tab_settings, text=" Settings & Credentials ")
+        self.notebook.add(self.tab_wallets, text=" Wallet Manager ")
+        self.notebook.add(self.tab_logs, text=" Live Console & Logs ")
+        self.notebook.add(self.tab_backup, text=" Backup & License ")
+
+        # --- TAB 1: Settings & Credentials ---
+        conn_card = ttk.Frame(self.tab_settings, style="Card.TFrame")
+        conn_card.pack(fill=tk.X, pady=(0, 10))
         conn_inner = tk.Frame(conn_card, bg=BG_CARD, padx=12, pady=10)
         conn_inner.pack(fill=tk.X)
         
@@ -572,9 +228,9 @@ class ConfiguratorApp:
         
         conn_inner.columnconfigure(1, weight=1)
  
-        # 3. Preferences Card
-        pref_card = ttk.Frame(self.main_container, style="Card.TFrame")
-        pref_card.pack(fill=tk.X, pady=(0, 15), padx=1)
+        # Preferences Card
+        pref_card = ttk.Frame(self.tab_settings, style="Card.TFrame")
+        pref_card.pack(fill=tk.X, pady=(10, 0))
         pref_inner = tk.Frame(pref_card, bg=BG_CARD, padx=12, pady=10)
         pref_inner.pack(fill=tk.X)
         
@@ -618,9 +274,9 @@ class ConfiguratorApp:
         pref_inner.columnconfigure(1, weight=1)
         pref_inner.columnconfigure(3, weight=1)
 
-        # 4. Wallet Manager Card
-        wallet_card = ttk.Frame(self.main_container, style="Card.TFrame")
-        wallet_card.pack(fill=tk.BOTH, expand=True, pady=(0, 15), padx=1)
+        # --- TAB 2: Wallet Manager ---
+        wallet_card = ttk.Frame(self.tab_wallets, style="Card.TFrame")
+        wallet_card.pack(fill=tk.BOTH, expand=True)
         wallet_inner = tk.Frame(wallet_card, bg=BG_CARD, padx=12, pady=10)
         wallet_inner.pack(fill=tk.BOTH, expand=True)
         
@@ -631,7 +287,7 @@ class ConfiguratorApp:
         user_frame.grid(row=1, column=0, sticky=tk.NSEW, padx=(0, 10))
         ttk.Label(user_frame, text="User Wallets (Tracks All Tokens)", background=BG_CARD, foreground=TEXT_MUTED).pack(anchor=tk.W, pady=(0, 3))
         
-        self.user_listbox = tk.Listbox(user_frame, bg=BG_MAIN, fg=TEXT_COLOR, selectbackground=ACCENT_BLUE, bd=1, relief=tk.SOLID, selectforeground="#ffffff", highlightthickness=0, height=8)
+        self.user_listbox = tk.Listbox(user_frame, bg=BG_MAIN, fg=TEXT_COLOR, selectbackground=ACCENT_BLUE, bd=1, relief=tk.SOLID, selectforeground="#ffffff", highlightthickness=0, height=12)
         self.user_listbox.pack(fill=tk.BOTH, expand=True)
         self.user_listbox.bind("<Double-1>", lambda e: self.copy_selected_address(self.user_listbox, self.user_wallets_map))
         
@@ -646,7 +302,7 @@ class ConfiguratorApp:
         token_frame.grid(row=1, column=1, sticky=tk.NSEW, padx=(10, 0))
         ttk.Label(token_frame, text="Token Accounts (Tracks Single Token)", background=BG_CARD, foreground=TEXT_MUTED).pack(anchor=tk.W, pady=(0, 3))
         
-        self.token_listbox = tk.Listbox(token_frame, bg=BG_MAIN, fg=TEXT_COLOR, selectbackground=ACCENT_BLUE, bd=1, relief=tk.SOLID, selectforeground="#ffffff", highlightthickness=0, height=8)
+        self.token_listbox = tk.Listbox(token_frame, bg=BG_MAIN, fg=TEXT_COLOR, selectbackground=ACCENT_BLUE, bd=1, relief=tk.SOLID, selectforeground="#ffffff", highlightthickness=0, height=12)
         self.token_listbox.pack(fill=tk.BOTH, expand=True)
         self.token_listbox.bind("<Double-1>", lambda e: self.copy_selected_address(self.token_listbox, self.token_wallets_map))
         
@@ -656,60 +312,89 @@ class ConfiguratorApp:
         ttk.Button(btn_token_frame, text="Copy", style="Gray.TButton", command=lambda: self.copy_selected_address(self.token_listbox, self.token_wallets_map)).pack(side=tk.LEFT, padx=(5, 5))
         ttk.Button(btn_token_frame, text="Remove", style="Red.TButton", command=self.remove_token_wallet).pack(side=tk.LEFT)
         
+        # Status feedback label in Tab 2
+        self.wallet_status_lbl = ttk.Label(wallet_inner, text="", font=("Helvetica", 9), background=BG_CARD, foreground=ACCENT_BLUE)
+        self.wallet_status_lbl.grid(row=2, column=0, columnspan=2, pady=(5, 0))
+        
         wallet_inner.rowconfigure(1, weight=1)
         wallet_inner.columnconfigure(0, weight=1)
         wallet_inner.columnconfigure(1, weight=1)
         
         self.update_wallet_lists()
- 
-        # 5. Live Logs Display (Collapsible text)
-        self.logs_visible = False
-        self.log_frame = tk.Frame(self.main_container, bg=BG_MAIN)
-        self.log_text = tk.Text(self.log_frame, height=8, bg="#0d0d0f", fg="#a9a9b3", insertbackground=TEXT_COLOR, state=tk.DISABLED, font=("Consolas", 9), bd=1, relief=tk.SOLID)
-        self.log_text.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
+
+        # --- TAB 3: Live Console & Logs ---
+        console_frame = tk.Frame(self.tab_logs, bg=BG_MAIN)
+        console_frame.pack(fill=tk.X, side=tk.TOP, pady=(0, 10))
         
-        # Log coloring tags
-        self.log_text.tag_config("info", foreground="#60a5fa")     # Soft blue
-        self.log_text.tag_config("warning", foreground="#fbbf24")  # Soft yellow
-        self.log_text.tag_config("error", foreground="#f87171")    # Soft red
-        
-        # 6. Bottom Execution Console
-        console_frame = tk.Frame(self.main_container, bg=BG_MAIN)
-        console_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 0))
-        
-        # Left side - Controls
         self.start_btn = ttk.Button(console_frame, text="Start Tracker Bot", style="Green.TButton", command=self.start_bot)
         self.start_btn.pack(side=tk.LEFT)
         
         self.stop_btn = ttk.Button(console_frame, text="Stop Tracker Bot", style="Red.TButton", command=self.stop_bot, state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT, padx=10)
         
-        self.logs_btn = ttk.Button(console_frame, text="View Logs", style="Gray.TButton", command=self.toggle_logs)
-        self.logs_btn.pack(side=tk.LEFT)
+        btn_clear_console = ttk.Button(console_frame, text="Clear Console", style="Gray.TButton", command=self.clear_log_display)
+        btn_clear_console.pack(side=tk.LEFT)
         
-        # Right side - Status and Exit
-        ttk.Button(console_frame, text="Exit Configuration", style="Gray.TButton", command=self.clean_exit).pack(side=tk.RIGHT)
+        ttk.Button(console_frame, text="Exit", style="Gray.TButton", command=self.clean_exit).pack(side=tk.RIGHT)
         
         self.status_lbl = ttk.Label(console_frame, text="● Status: Stopped", font=("Helvetica", 10, "bold"), foreground=ACCENT_RED)
         self.status_lbl.pack(side=tk.RIGHT, padx=20)
+        
+        self.log_text = tk.Text(self.tab_logs, bg="#0d0d0f", fg="#a9a9b3", insertbackground=TEXT_COLOR, state=tk.DISABLED, font=("Consolas", 9), bd=1, relief=tk.SOLID)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Log coloring tags
+        self.log_text.tag_config("info", foreground="#60a5fa")     # Soft blue
+        self.log_text.tag_config("warning", foreground="#fbbf24")  # Soft yellow
+        self.log_text.tag_config("error", foreground="#f87171")    # Soft red
+        
+        self.logs_visible = True
 
-    # Scrolling Helpers
-    def _on_frame_configure(self, event):
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        # --- TAB 4: Backup & License ---
+        backup_card = ttk.Frame(self.tab_backup, style="Card.TFrame")
+        backup_card.pack(fill=tk.X, pady=(0, 10))
+        backup_inner = tk.Frame(backup_card, bg=BG_CARD, padx=12, pady=12)
+        backup_inner.pack(fill=tk.X)
+        
+        ttk.Label(backup_inner, text="Backup & Restore", style="CardLabel.TLabel").pack(anchor=tk.W, pady=(0, 5))
+        ttk.Label(backup_inner, text="Export or import your list of tracked wallets to backup your settings or sync configuration across files.", background=BG_CARD, foreground=TEXT_MUTED, font=("Helvetica", 9)).pack(anchor=tk.W, pady=(0, 15))
+        
+        btn_back_frame = tk.Frame(backup_inner, bg=BG_CARD)
+        btn_back_frame.pack(fill=tk.X, anchor=tk.W)
+        
+        btn_export = ttk.Button(btn_back_frame, text="Export Tracked List", style="Blue.TButton", command=self.export_config)
+        btn_export.pack(side=tk.LEFT, padx=(0, 10))
+        
+        btn_import = ttk.Button(btn_back_frame, text="Import Tracked List", style="Gray.TButton", command=self.import_config)
+        btn_import.pack(side=tk.LEFT)
+        
+        license_card = ttk.Frame(self.tab_backup, style="Card.TFrame")
+        license_card.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        license_inner = tk.Frame(license_card, bg=BG_CARD, padx=12, pady=12)
+        license_inner.pack(fill=tk.BOTH, expand=True)
+        
+        ttk.Label(license_inner, text="About & Open Source License", style="CardLabel.TLabel").pack(anchor=tk.W, pady=(0, 5))
+        
+        about_text = (
+            "Solana Telegram Tracker Configurator v1.1.0\n"
+            "An open-source transaction monitoring system for Solana wallets.\n"
+            "Created by devops-user (c) 2026.\n\n"
+            "Licensed under the MIT License:\n\n"
+            "Permission is hereby granted, free of charge, to any person obtaining a copy\n"
+            "of this software and associated documentation files (the \"Software\"), to deal\n"
+            "in the Software without restriction, including without limitation the rights\n"
+            "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n"
+            "copies of the Software, and to permit persons to whom the Software is\n"
+            "furnished to do so, subject to the following conditions:\n\n"
+            "The above copyright notice and this permission notice shall be included in all\n"
+            "copies or substantial portions of the Software."
+        )
+        
+        license_textbox = tk.Text(license_inner, bg="#0d0d0f", fg=TEXT_MUTED, font=("Consolas", 8), wrap=tk.WORD, bd=1, relief=tk.SOLID)
+        license_textbox.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
+        license_textbox.insert(tk.END, about_text)
+        license_textbox.config(state=tk.DISABLED)
 
-    def _on_canvas_configure(self, event):
-        self.canvas.itemconfig(self.canvas_frame_id, width=event.width)
-        req_height = self.main_container.winfo_reqheight()
-        if req_height < event.height:
-            self.canvas.itemconfig(self.canvas_frame_id, height=event.height)
-
-    def _on_mousewheel(self, event):
-        if event.num == 4:
-            self.canvas.yview_scroll(-1, "units")
-        elif event.num == 5:
-            self.canvas.yview_scroll(1, "units")
-        else:
-            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     # State Loaders
     def load_env_values(self):
@@ -787,22 +472,25 @@ class ConfiguratorApp:
             results = []
             success = True
             
-            # 1. Test Solana RPC URLs
+            # 1. Test Solana RPC URLs with Latency check
             rpc_urls = [u.strip() for u in rpc_url.split(",")]
             rpc_ok = False
             rpc_errors = []
+            latency_ms = None
             for u in rpc_urls:
                 if not (u.startswith("http://") or u.startswith("https://")):
                     rpc_errors.append(f"Invalid URL schema: {u}")
                     continue
                 try:
-                    # Solana JSON-RPC post request
                     payload = {"jsonrpc": "2.0", "id": 1, "method": "getSlot"}
+                    start_time = time.time()
                     response = requests.post(u, json=payload, timeout=5)
+                    elapsed = (time.time() - start_time) * 1000
                     if response.status_code == 200:
                         res_json = response.json()
                         if "result" in res_json:
                             rpc_ok = True
+                            latency_ms = int(elapsed)
                             break
                         else:
                             rpc_errors.append(f"{u}: Invalid JSON-RPC response")
@@ -812,7 +500,7 @@ class ConfiguratorApp:
                     rpc_errors.append(f"{u}: {str(e)}")
             
             if rpc_ok:
-                results.append("[✓] Solana RPC: Connected successfully.")
+                results.append(f"[✓] Solana RPC: Connected successfully ({latency_ms}ms).")
             else:
                 success = False
                 err_str = "; ".join(rpc_errors)
@@ -1083,23 +771,76 @@ class ConfiguratorApp:
         self.root.clipboard_append(addr)
         self.root.update()
         
-        # Temporary status message showing success
-        original_status = self.status_lbl.cget("text")
-        original_fg = self.status_lbl.cget("foreground")
-        self.status_lbl.config(text="[✓] Address copied to clipboard!", foreground=ACCENT_BLUE)
-        self.root.after(2000, lambda: self.status_lbl.config(text=original_status, foreground=original_fg))
+        self.wallet_status_lbl.config(text="[✓] Address copied to clipboard!")
+        self.root.after(2000, lambda: self.wallet_status_lbl.config(text=""))
 
-    # Log View
-    def toggle_logs(self):
-        if self.logs_visible:
-            self.log_frame.pack_forget()
-            self.logs_btn.config(text="View Logs")
-            self.logs_visible = False
-        else:
-            self.log_frame.pack(fill=tk.BOTH, expand=True, side=tk.BOTTOM, pady=(5, 0))
-            self.logs_btn.config(text="Hide Logs")
-            self.logs_visible = True
-            self.refresh_logs()
+    def clear_log_display(self):
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.config(state=tk.DISABLED)
+
+    def export_config(self):
+        filename = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Export Tracked List",
+            initialfile="tracked_backup.json",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All Files", "*.*")]
+        )
+        if not filename:
+            return
+            
+        try:
+            with open(filename, "w") as f:
+                json.dump(self.state, f, indent=2)
+            messagebox.showinfo("Export Success", f"Configuration successfully exported to:\n{filename}")
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export configuration: {e}")
+
+    def import_config(self):
+        filename = filedialog.askopenfilename(
+            parent=self.root,
+            title="Import Tracked List",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All Files", "*.*")]
+        )
+        if not filename:
+            return
+            
+        try:
+            with open(filename, "r") as f:
+                imported_data = json.load(f)
+                
+            if not isinstance(imported_data, dict) or "chats" not in imported_data:
+                messagebox.showerror("Import Error", "Invalid backup file schema: missing 'chats' object.")
+                return
+                
+            if not messagebox.askyesno("Confirm Import", "This will merge/overwrite your current tracked configuration with the backup file.\nAre you sure you want to proceed?"):
+                return
+                
+            if "chats" in imported_data:
+                for cid, cdata in imported_data["chats"].items():
+                    if cid not in self.state["chats"]:
+                        self.state["chats"][cid] = cdata
+                    else:
+                        if "tracked" in cdata:
+                            if "tracked" not in self.state["chats"][cid]:
+                                self.state["chats"][cid]["tracked"] = {}
+                            self.state["chats"][cid]["tracked"].update(cdata["tracked"])
+                        for k in ("currency", "interval", "active"):
+                            if k in cdata:
+                                self.state["chats"][cid][k] = cdata[k]
+                                
+            if "global_last_signatures" in imported_data:
+                if "global_last_signatures" not in self.state:
+                    self.state["global_last_signatures"] = {}
+                self.state["global_last_signatures"].update(imported_data["global_last_signatures"])
+                
+            self.save_state()
+            self.update_wallet_lists()
+            messagebox.showinfo("Import Success", "Configuration successfully imported and merged.")
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Failed to import configuration: {e}")
 
     def refresh_logs(self):
         if not self.logs_visible:

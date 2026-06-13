@@ -4,6 +4,7 @@ import json
 import time
 import re
 import logging
+from logging.handlers import RotatingFileHandler
 import traceback
 import io
 import threading
@@ -39,7 +40,7 @@ class CensorFormatter(logging.Formatter):
 logger = logging.getLogger("tracker")
 logger.setLevel(logging.INFO)
 
-fh = logging.FileHandler(LOG_FILE)
+fh = RotatingFileHandler(LOG_FILE, maxBytes=10*1024*1024, backupCount=3, encoding='utf-8')
 fh.setLevel(logging.INFO)
 
 ch = logging.StreamHandler(sys.stdout)
@@ -309,10 +310,10 @@ def send_help(chat_id):
     text = (
         "👋 <b>Solana Wallet Tracker Bot Help</b>\n\n"
         "<b>Available Commands:</b>\n"
-        "• <code>/add u &lt;address&gt;</code> - Track a user wallet (all tokens and SOL)\n"
-        "• <code>/add w &lt;address&gt;</code> - Track a specific token account address\n"
+        "• <code>/add u &lt;address&gt; [CUSTOM NAME]</code> - Track a user wallet (all tokens and SOL)\n"
+        "• <code>/add w &lt;address&gt; [CUSTOM NAME]</code> - Track a specific token account address\n"
         "• <code>/name &lt;address&gt; &lt;name&gt;</code> - Give a friendly name to a wallet\n"
-        "• <code>/remove &lt;address&gt;</code> - Stop tracking an address\n"
+        "• <code>/remove &lt;address_or_name&gt;</code> - Stop tracking an address/name\n"
         "• <code>/show</code> - List all currently tracked addresses\n"
         "• <code>/balance</code> - Show current balances of all tracked addresses\n"
         "• <code>/currency &lt;code&gt;</code> - Change display currency (USD, NIS, CAD, EUR...)\n"
@@ -708,10 +709,11 @@ def handle_telegram_message(msg):
         
     elif command == "/add":
         if len(args) < 2:
-            reply_to(chat_id, "❌ Usage: <code>/add u &lt;address&gt;</code> (user) or <code>/add w &lt;address&gt;</code> (wallet)")
+            reply_to(chat_id, "❌ Usage: <code>/add u &lt;address&gt; [CUSTOM NAME]</code> (user) or <code>/add w &lt;address&gt; [CUSTOM NAME]</code> (wallet)")
             return
         addr_type = args[0].lower()
         address = args[1]
+        custom_name = " ".join(args[2:]).strip() if len(args) > 2 else f"{address[:4]}...{address[-4:]}"
         
         if addr_type not in ("u", "w"):
             reply_to(chat_id, "❌ Invalid type. Use 'u' or 'w'.")
@@ -740,7 +742,7 @@ def handle_telegram_message(msg):
         with state_lock:
             tracked_entry = {
                 "type": "user" if addr_type == "u" else "wallet",
-                "name": f"{address[:4]}...{address[-4:]}"
+                "name": custom_name
             }
             if owner_addr:
                 tracked_entry["owner"] = owner_addr
@@ -755,22 +757,42 @@ def handle_telegram_message(msg):
             
         type_lbl = "User Wallet" if addr_type == "u" else "Specific Token Account"
         extra_info = f"\nOwner: <code>{owner_addr}</code>" if owner_addr else ""
-        reply_to(chat_id, f"✅ Tracking added for {type_lbl}:\n<code>{address}</code>{extra_info}\nDefault Name: <code>{address[:4]}...{address[-4:]}</code>")
+        reply_to(chat_id, f"✅ Tracking added for {type_lbl}:\n<code>{address}</code>{extra_info}\nName: <code>{custom_name}</code>")
         
     elif command == "/remove":
         if not args:
-            reply_to(chat_id, "❌ Usage: <code>/remove &lt;address&gt;</code>")
+            reply_to(chat_id, "❌ Usage: <code>/remove &lt;address_or_custom_name&gt;</code>")
             return
-        address = args[0]
+        target = " ".join(args).strip()
+        removed_addresses = []
         with state_lock:
             chat_data = state["chats"][str(chat_id)]
             tracked = chat_data.get("tracked", {})
-            if address in tracked:
-                del tracked[address]
-                save_state_unlocked()
-                reply_to(chat_id, f"🗑️ Stopped tracking <code>{address}</code>.")
+            
+            if target in tracked:
+                name = tracked[target].get("name", target)
+                del tracked[target]
+                removed_addresses.append((target, name))
             else:
-                reply_to(chat_id, "❌ Address not tracked in this chat.")
+                to_remove = []
+                for addr, info in tracked.items():
+                    name = info.get("name", "")
+                    if name.strip().lower() == target.lower():
+                        to_remove.append((addr, name))
+                for addr, name in to_remove:
+                    del tracked[addr]
+                    removed_addresses.append((addr, name))
+            
+            if removed_addresses:
+                save_state_unlocked()
+                
+        if removed_addresses:
+            lines = []
+            for addr, name in removed_addresses:
+                lines.append(f"🗑️ Stopped tracking <b>{name}</b> (<code>{addr}</code>).")
+            reply_to(chat_id, "\n".join(lines))
+        else:
+            reply_to(chat_id, f"❌ Address or custom name '<code>{target}</code>' is not tracked in this chat.")
                 
     elif command == "/name":
         if len(args) < 2:
@@ -1029,7 +1051,14 @@ def solana_poller_loop():
                     continue
                     
                 new_sigs.reverse()
-                logger.info(f"Retrieved {len(new_sigs)} new transaction(s) for {address[:8]}...")
+                names = []
+                with state_lock:
+                    for cid, cdata in state.get("chats", {}).items():
+                        tracked = cdata.get("tracked", {})
+                        if address in tracked:
+                            names.append(tracked[address].get("name", address[:8]))
+                name_str = " / ".join(list(set(names))) if names else address[:8]
+                logger.info(f"Retrieved {len(new_sigs)} new transaction(s) for {name_str}...")
                 
                 last_successful_sig = last_sig
                 for sig in new_sigs:
