@@ -17,14 +17,14 @@ if %errorlevel% neq 0 (
 )
 
 :: Create virtual environment if it doesn't exist
-if not exist ".venv" (
+if not exist ".venv_win" (
     echo Creating virtual environment...
-    python -m venv .venv
+    python -m venv .venv_win
 )
 
 :: Activate virtual environment
 echo Activating virtual environment...
-call .venv\Scripts\activate
+call .venv_win\Scripts\activate
 
 :: Install requirements and PyInstaller
 echo Installing dependencies and PyInstaller...
