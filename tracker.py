@@ -627,6 +627,40 @@ def send_chat_summary(chat_id, chat_data):
                 "disable_web_page_preview": True
             })
 
+def flush_accumulated_txs(chat_id):
+    global state
+    with state_lock:
+        chat_id_str = str(chat_id)
+        if chat_id_str not in state.get("chats", {}):
+            return
+        chat_data = state["chats"][chat_id_str]
+        txs_to_send = list(chat_data.get("accumulated_txs", []))
+        if not txs_to_send:
+            return
+            
+    send_chat_summary(chat_id, chat_data)
+    
+    with state_lock:
+        if os.path.exists(STATE_FILE):
+            try:
+                with open(STATE_FILE, "r") as f:
+                    current_state = json.load(f)
+            except Exception:
+                current_state = state
+        else:
+            current_state = state
+            
+        chat_state = current_state.get("chats", {}).get(chat_id_str, {})
+        current_txs = chat_state.get("accumulated_txs", [])
+        
+        sent_sigs = {tx["sig"] for tx in txs_to_send}
+        remaining_txs = [tx for tx in current_txs if tx["sig"] not in sent_sigs]
+        
+        state = current_state
+        state["chats"][chat_id_str]["accumulated_txs"] = remaining_txs
+        state["chats"][chat_id_str]["last_summary_time"] = time.time()
+        save_state_unlocked()
+
 # Msg dispatch handler
 def handle_telegram_message(msg):
     chat = msg.get("chat", {})
@@ -813,6 +847,10 @@ def handle_telegram_message(msg):
             state["chats"][str(chat_id)]["interval"] = intv
             state["chats"][str(chat_id)]["last_summary_time"] = time.time()
             save_state_unlocked()
+            
+        # Flush any accumulated logs immediately
+        flush_accumulated_txs(chat_id)
+        
         if intv == 1:
             reply_to(chat_id, "⏱️ Interval set to 1 min. Realtime alerts activated.")
         else:
