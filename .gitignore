@@ -1,0 +1,15 @@
+# Ignore Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# Ignore local secrets and state files
+secrets/*
+
+# Ignore logs
+logs/*
