@@ -42,8 +42,8 @@ class ConfiguratorApp:
         self.root.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
         
         self.in_map_transition = False
+        self.root.bind("<Map>", self.on_map)
         if sys.platform == "win32":
-            self.root.bind("<Map>", self.on_map)
             self.root.after(10, self.set_appwindow)
         
         # Custom messagebox wrapper
@@ -972,8 +972,7 @@ class ConfiguratorApp:
         self.root.after(1000, self.check_process)
 
     def minimize_window(self):
-        if sys.platform == "win32":
-            self.root.overrideredirect(False)
+        self.root.overrideredirect(False)
         self.root.iconify()
 
     def set_appwindow(self):
@@ -1000,10 +999,10 @@ class ConfiguratorApp:
                 self.in_map_transition = False
 
     def on_map(self, event):
+        if getattr(self, "in_map_transition", False):
+            return
+        self.root.overrideredirect(True)
         if sys.platform == "win32":
-            if getattr(self, "in_map_transition", False):
-                return
-            self.root.overrideredirect(True)
             self.set_appwindow()
         
     def toggle_maximize(self):
