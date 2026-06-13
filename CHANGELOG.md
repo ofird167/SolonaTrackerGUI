@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-06-13
+
+### Changed
+- **Release Directory Packaging**: Configured `build.bat` to package the compiled standalone executables (`configurator.exe` and `tracker.exe`) into a dedicated, self-contained `release/` folder rather than dumping them in the repository root directory.
+- **Dynamic Executable Path Resolution**: Updated `configurator.py` and `tracker.py` to resolve their base directories dynamically using `sys.frozen`. This ensures configuration and state files (like `secrets/.env`, `secrets/tracked.json`, and `logs/tracker.log`) are correctly loaded and written relative to the executable's directory when packaged, rather than being lost in PyInstaller's temporary execution folders.
+- **Release Environment Template**: Automatically copies `example.env` into `release/secrets/example.env` as a clean starter configuration.
+- **Windows Taskbar & Minimizing**: Fixed taskbar visibility and minimizing behavior on Windows. When compiling, Tkinter's `winfo_id()` is now updated and mapped before registering the app window. A delayed initialization strategy via `<Map>` bindings and dynamic style adjustments allows borderless executables to minimize to the taskbar and restore properly without losing focus.
+
 ## [1.1.2] - 2026-06-13
 
 ### Fixed

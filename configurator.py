@@ -13,7 +13,10 @@ messagebox = None
 
 
 # Paths
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(BASE_DIR, "secrets", ".env")
 STATE_PATH = os.path.join(BASE_DIR, "secrets", "tracked.json")
 LOG_PATH = os.path.join(BASE_DIR, "logs", "tracker.log")
@@ -38,18 +41,10 @@ class ConfiguratorApp:
         self.root.overrideredirect(True)
         self.root.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
         
+        self.in_map_transition = False
         if sys.platform == "win32":
-            try:
-                import ctypes
-                hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
-                style = ctypes.windll.user32.GetWindowLongW(hwnd, -20)  # GWL_EXSTYLE
-                style = style & ~0x00000080  # Remove WS_EX_TOOLWINDOW
-                style = style | 0x00040000   # Add WS_EX_APPWINDOW
-                ctypes.windll.user32.SetWindowLongW(hwnd, -20, style)
-                self.root.withdraw()
-                self.root.deiconify()
-            except Exception:
-                pass
+            self.root.bind("<Map>", self.on_map)
+            self.root.after(10, self.set_appwindow)
         
         # Custom messagebox wrapper
         global messagebox
@@ -471,9 +466,9 @@ class ConfiguratorApp:
             self.show_token_btn.config(text="Show")
 
     def test_connections(self):
-        token = self.token_var.get().strip()
-        chat_id = self.chat_id_var.get().strip()
-        rpc_url = self.rpc_url_var.get().strip()
+        token = self.token_var.get().replace('\r', '').replace('\n', '').strip()
+        chat_id = self.chat_id_var.get().replace('\r', '').replace('\n', '').strip()
+        rpc_url = self.rpc_url_var.get().replace('\r', '').replace('\n', '').strip()
         
         if not token:
             messagebox.showwarning("Test Error", "Telegram Bot Token is required to run connection tests.")
@@ -574,9 +569,9 @@ class ConfiguratorApp:
             messagebox.showerror("Connection Test Failure", message_str)
 
     def save_connections(self):
-        token = self.token_var.get().strip()
-        chat_id = self.chat_id_var.get().strip()
-        rpc_url = self.rpc_url_var.get().strip()
+        token = self.token_var.get().replace('\r', '').replace('\n', '').strip()
+        chat_id = self.chat_id_var.get().replace('\r', '').replace('\n', '').strip()
+        rpc_url = self.rpc_url_var.get().replace('\r', '').replace('\n', '').strip()
         
         if not token:
             messagebox.showwarning("Validation Error", "Telegram Token cannot be empty.")
@@ -977,7 +972,39 @@ class ConfiguratorApp:
         self.root.after(1000, self.check_process)
 
     def minimize_window(self):
+        if sys.platform == "win32":
+            self.root.overrideredirect(False)
         self.root.iconify()
+
+    def set_appwindow(self):
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                self.root.update_idletasks()
+                hwnd = self.root.winfo_id()
+                parent_hwnd = ctypes.windll.user32.GetParent(hwnd)
+                if parent_hwnd:
+                    hwnd = parent_hwnd
+                
+                style = ctypes.windll.user32.GetWindowLongW(hwnd, -20)  # GWL_EXSTYLE
+                style = style & ~0x00000080  # Remove WS_EX_TOOLWINDOW
+                style = style | 0x00040000   # Add WS_EX_APPWINDOW
+                ctypes.windll.user32.SetWindowLongW(hwnd, -20, style)
+                
+                # Prevent recursive Map triggers when deiconifying
+                self.in_map_transition = True
+                self.root.withdraw()
+                self.root.deiconify()
+                self.in_map_transition = False
+            except Exception:
+                self.in_map_transition = False
+
+    def on_map(self, event):
+        if sys.platform == "win32":
+            if getattr(self, "in_map_transition", False):
+                return
+            self.root.overrideredirect(True)
+            self.set_appwindow()
         
     def toggle_maximize(self):
         if self.is_maximized:

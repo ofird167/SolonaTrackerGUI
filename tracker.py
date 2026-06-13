@@ -12,7 +12,10 @@ import requests
 from dotenv import load_dotenv
 
 # Set up paths
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(BASE_DIR, "logs", "tracker.log")
 STATE_FILE = os.path.join(BASE_DIR, "secrets", "tracked.json")
 

@@ -13,3 +13,8 @@ secrets/*
 
 # Ignore logs
 logs/*
+
+# Ignore build release directory and standalone executables
+release/
+tracker.exe
+configurator.exe

@@ -10,8 +10,16 @@ class CustomMessageDialog(tk.Toplevel):
     def __init__(self, parent, title, message, dialog_type="info"):
         super().__init__(parent)
         self.title(title)
-        self.geometry("400x180")
-        self.resizable(False, False)
+        
+        # Decide sizing and resizability based on message length
+        is_long_message = len(message) > 180
+        if is_long_message:
+            self.geometry("550x300")
+            self.resizable(True, True)
+        else:
+            self.geometry("400x180")
+            self.resizable(False, False)
+            
         self.configure(bg=BG_MAIN)
         self.transient(parent)
         self.grab_set()
@@ -92,8 +100,32 @@ class CustomMessageDialog(tk.Toplevel):
         lbl_icon = tk.Label(content_frame, text=accent_symbol, bg=BG_MAIN, fg=accent_color, font=("Courier", 18, "bold"))
         lbl_icon.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 15))
         
-        msg_lbl = tk.Label(content_frame, text=message, bg=BG_MAIN, fg=TEXT_COLOR, justify=tk.LEFT, font=("Helvetica", 10), wraplength=300)
-        msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.W)
+        if is_long_message:
+            # Use scrollable Text box for long logs or stack traces
+            text_frame = tk.Frame(content_frame, bg=BG_MAIN)
+            text_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            
+            scrollbar = ttk.Scrollbar(text_frame)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            msg_text = tk.Text(
+                text_frame, 
+                bg=BG_MAIN, 
+                fg=TEXT_COLOR, 
+                font=("Helvetica", 10), 
+                wrap=tk.WORD, 
+                bd=0, 
+                highlightthickness=0,
+                yscrollcommand=scrollbar.set
+            )
+            msg_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.config(command=msg_text.yview)
+            
+            msg_text.insert(tk.END, message)
+            msg_text.config(state=tk.DISABLED)
+        else:
+            msg_lbl = tk.Label(content_frame, text=message, bg=BG_MAIN, fg=TEXT_COLOR, justify=tk.LEFT, font=("Helvetica", 10), wraplength=300)
+            msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.W)
         
         btn_frame = tk.Frame(self, bg=BG_MAIN, pady=10)
         btn_frame.pack(fill=tk.X, side=tk.BOTTOM)

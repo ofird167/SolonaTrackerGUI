@@ -51,14 +51,29 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: Move executables to root directory
+:: Create release directory structure
 echo.
-echo Moving executables to root directory...
+echo Creating release directory...
+if not exist "release" (
+    mkdir "release"
+)
+if not exist "release\secrets" (
+    mkdir "release\secrets"
+)
+
+:: Move executables to release directory
+echo.
+echo Moving executables to release directory...
 if exist "dist\tracker.exe" (
-    move /y "dist\tracker.exe" "tracker.exe"
+    move /y "dist\tracker.exe" "release\tracker.exe"
 )
 if exist "dist\configurator.exe" (
-    move /y "dist\configurator.exe" "configurator.exe"
+    move /y "dist\configurator.exe" "release\configurator.exe"
+)
+
+:: Copy example.env to release\secrets
+if exist "example.env" (
+    copy /y "example.env" "release\secrets\example.env"
 )
 
 :: Cleanup build files
@@ -72,13 +87,14 @@ del /q configurator.spec
 echo.
 echo ==============================================
 echo   Build Successful! 
-echo   Generated files:
-echo   - configurator.exe (Configuration Panel GUI)
-echo   - tracker.exe      (Background Bot Worker)
+echo   Generated files in "release" folder:
+echo   - release\configurator.exe (Configuration Panel GUI)
+echo   - release\tracker.exe      (Background Bot Worker)
+echo   - release\secrets\example.env
 echo.
-echo   You can copy the entire "telegramcrypt" folder
+echo   You can zip and copy the "release" folder
 echo   to your friend's PC. They only need to run
-echo   "configurator.exe" - no Python required!
+echo   "configurator.exe" inside the release folder!
 echo ==============================================
 echo.
 pause
