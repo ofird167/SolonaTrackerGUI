@@ -111,7 +111,7 @@ class ConfiguratorApp:
         self.tracker_process = None
         
         # Load configs
-        self.token, self.chat_id, self.rpc_url = self.load_env_values()
+        self.token, self.chat_id, self.rpc_url, self.auto_start = self.load_env_values()
         self.state = self.load_state_values()
         
         # Create UI
@@ -120,6 +120,15 @@ class ConfiguratorApp:
         
         # Process monitor loop
         self.check_process()
+        
+        # Auto-start bot if configured
+        if self.auto_start == "true":
+            if self.chat_id:
+                chat_id_str = str(self.chat_id)
+                if "chats" in self.state and chat_id_str in self.state["chats"]:
+                    self.state["chats"][chat_id_str]["active"] = True
+                    self.save_state()
+            self.root.after(500, self.start_bot)
 
     def setup_styles(self):
         style = ttk.Style()
@@ -249,6 +258,23 @@ class ConfiguratorApp:
         save_pref_btn = ttk.Button(pref_inner, text="Save Preferences", style="Blue.TButton", command=self.save_preferences)
         save_pref_btn.grid(row=1, column=4, padx=(20, 0))
         
+        # Auto-start Service Checkbox
+        self.auto_start_var = tk.BooleanVar(value=(self.auto_start == "true"))
+        self.auto_start_check = tk.Checkbutton(
+            pref_inner, 
+            text="Auto-start Tracker Bot on launch (Skips UI clicking & Telegram /start)", 
+            variable=self.auto_start_var, 
+            bg=BG_CARD, 
+            fg=TEXT_COLOR, 
+            selectcolor=BG_MAIN, 
+            activebackground=BG_CARD, 
+            activeforeground=TEXT_COLOR,
+            font=("Helvetica", 10),
+            bd=0,
+            highlightthickness=0
+        )
+        self.auto_start_check.grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(5, 0))
+        
         pref_inner.columnconfigure(1, weight=1)
         pref_inner.columnconfigure(3, weight=1)
 
@@ -350,6 +376,7 @@ class ConfiguratorApp:
         token = ""
         chat_id = ""
         rpc_url = "https://api.mainnet-beta.solana.com"
+        auto_start = "false"
         if os.path.exists(ENV_PATH):
             try:
                 with open(ENV_PATH, "r") as f:
@@ -367,9 +394,11 @@ class ConfiguratorApp:
                                 chat_id = v
                             elif k == "SOLANA_RPC_URL":
                                 rpc_url = v
+                            elif k == "AUTO_START_BOT":
+                                auto_start = v
             except Exception as e:
                 print(f"Error loading env: {e}")
-        return token, chat_id, rpc_url
+        return token, chat_id, rpc_url, auto_start
 
     def load_state_values(self):
         if os.path.exists(STATE_PATH):
@@ -536,13 +565,14 @@ class ConfiguratorApp:
                 f.write(f"TELEGRAM_BOT_TOKEN={token}\n")
                 f.write(f"TELEGRAM_CHAT_ID={chat_id}\n")
                 f.write(f"SOLANA_RPC_URL={rpc_url}\n")
+                f.write(f"AUTO_START_BOT={self.auto_start}\n")
             
             # Update internal variables
             self.token = token
             self.chat_id = chat_id
             self.rpc_url = rpc_url
             
-            # Add chat config if not present in state
+            # Add/Activate chat config in state
             if chat_id:
                 chat_id_str = str(chat_id)
                 if "chats" not in self.state:
@@ -556,7 +586,9 @@ class ConfiguratorApp:
                         "tracked": {},
                         "accumulated_txs": []
                     }
-                    self.save_state()
+                else:
+                    self.state["chats"][chat_id_str]["active"] = True
+                self.save_state()
             
             self.update_wallet_lists()
             messagebox.showinfo("Success", "Connection parameters saved successfully.")
@@ -570,7 +602,21 @@ class ConfiguratorApp:
             
         curr = self.currency_var.get()
         intv = int(self.interval_var.get())
+        auto_start_val = "true" if self.auto_start_var.get() else "false"
         
+        self.auto_start = auto_start_val
+        
+        # Write to env
+        try:
+            with open(ENV_PATH, "w") as f:
+                f.write(f"TELEGRAM_BOT_TOKEN={self.token}\n")
+                f.write(f"TELEGRAM_CHAT_ID={self.chat_id}\n")
+                f.write(f"SOLANA_RPC_URL={self.rpc_url}\n")
+                f.write(f"AUTO_START_BOT={self.auto_start}\n")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to update environment variables: {e}")
+            return
+            
         chat_id_str = str(self.chat_id)
         if "chats" not in self.state:
             self.state["chats"] = {}
@@ -582,6 +628,8 @@ class ConfiguratorApp:
                 "tracked": {},
                 "accumulated_txs": []
             }
+        else:
+            self.state["chats"][chat_id_str]["active"] = True
             
         self.state["chats"][chat_id_str]["currency"] = curr
         self.state["chats"][chat_id_str]["interval"] = intv

@@ -804,10 +804,10 @@ def handle_telegram_message(msg):
             return
         try:
             intv = int(args[0])
-            if intv < 0:
+            if intv < 1:
                 raise ValueError()
         except ValueError:
-            reply_to(chat_id, "❌ Interval must be a non-negative integer.")
+            reply_to(chat_id, "❌ Interval must be a positive integer (at least 1 minute).")
             return
         with state_lock:
             state["chats"][str(chat_id)]["interval"] = intv
@@ -815,8 +815,6 @@ def handle_telegram_message(msg):
             save_state_unlocked()
         if intv == 1:
             reply_to(chat_id, "⏱️ Interval set to 1 min. Realtime alerts activated.")
-        elif intv == 0:
-            reply_to(chat_id, "⏱️ Interval set to 0. Testing mode: 10-second summary cooldown activated.")
         else:
             reply_to(chat_id, f"⏱️ Interval set to {intv} minutes. Accumulating logs.")
             
@@ -1047,7 +1045,7 @@ def summary_scheduler_loop():
                     if interval == 1:
                         continue
                         
-                    cooldown = 10 if interval == 0 else interval * 60
+                    cooldown = interval * 60
                     
                     last_summary = chat_data.get("last_summary_time", 0.0)
                     if last_summary == 0.0:

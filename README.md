@@ -93,7 +93,8 @@ The Desktop GUI (`configurator.py`) provides an easy interface to control the bo
    * **Test Connections**: Validate RPC health and Telegram bot details with a single click.
 2. **Preferences**:
    * **Default Currency**: Choose your conversion currency (USD, NIS, EUR, CAD, GBP, AUD) for price alerts.
-   * **Summary Interval**: Choose how often the bot sends logs (1 min for real-time alerts, or longer periods to accumulate summaries).
+   * **Summary Interval**: Choose how often the bot sends logs (1 min for real-time alerts, or longer periods to accumulate summaries. Minimum interval is 1 minute).
+   * **Auto-start**: Option to automatically boot the background tracking service on configurator launch. This automatically forces the Telegram chat status to active (skips the need to run `/start` on Telegram).
 3. **Wallet Address Manager**:
    * **User Wallets**: Tracks all trades and token transfers associated with the wallet.
    * **Token Accounts**: Tracks transactions on a single specific token.
@@ -120,7 +121,7 @@ If the bot is running, users with access to the configured chat can execute comm
 | `/show` | `/show` | Lists all currently tracked addresses. |
 | `/balance` | `/balance` | Fetches and displays current Solana balances for tracked wallets. |
 | `/currency` | `/currency [<USD/NIS/EUR/etc.>]` | Views or updates the fiat currency for price conversions. |
-| `/interval` | `/interval [<minutes>]` | Views or updates summary interval (1 for real-time, 0 for testing, >1 for accumulated reports). |
+| `/interval` | `/interval [<minutes>]` | Views or updates summary interval (1 for real-time, >1 for accumulated reports). |
 | `/export` | `/export` | Exports tracking details. |
 
 ---
