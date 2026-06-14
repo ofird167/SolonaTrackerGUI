@@ -69,15 +69,16 @@ echo
 echo "Cleaning up build files..."
 rm -rf build dist tracker.spec configurator.spec
 
+# Create tarball archive
+echo
+echo "Creating release tarball archive..."
+tar -czf solana-wallet-tracker-linux.tar.gz release/
+
 echo
 echo "=============================================="
 echo "   Build Successful!"
-echo "   Generated files in \"release\" folder:"
-echo "   - release/configurator (Configuration Panel GUI)"
-echo "   - release/tracker      (Background Bot Worker)"
-echo "   - release/secrets/example.env"
-echo
-echo "   You can tar/zip and copy the \"release\" folder."
-echo "   Users only need to run \"configurator\"!"
+echo "   Generated release file:"
+echo "   - solana-wallet-tracker-linux.tar.gz"
+echo "   (Extracting it contains the release folder structure)"
 echo "=============================================="
 echo

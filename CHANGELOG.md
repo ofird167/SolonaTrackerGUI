@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-06-14
+
+### Added
+- **Dynamic Localization & Multi-Language Support**: Fully translated all GUI labels, tabs, status logs, error alerts, and info messages into English, Russian, and Arabic. Swapping the active language in the settings tab updates the interface immediately at runtime.
+- **Localized Modal Windows & Popups**: Upgraded custom dialog modals (`CustomMessageDialog`, `CustomConfirmDialog`, `CustomAddAddressDialog`) and `MessageBoxWrapper` to inherit active translation helpers dynamically.
+- **Release Documentation & Screenshots**: Copied visual screenshots into the repository structure (`assets/`) and updated the `README.md` to reference them.
+
+### Fixed
+- **Combobox Style Contrast**: Configured readonly state colors and listbox option database defaults in `gui_styles.py` to prevent white-on-white text rendering issues in Dark Mode.
+- **Icon Sizing & Title Bar Inheritance**: Subsampled the Solana PhotoImage icon data down to 32x32 for better title bar mapping support on native window managers.
+
 ## [1.2.0] - 2026-06-13
 
 ### Changed

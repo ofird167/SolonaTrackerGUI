@@ -61,23 +61,68 @@ logger.addHandler(ch)
 state = {"chats": {}, "global_last_signatures": {}}
 state_lock = threading.Lock()
 
+import contextlib
+
+@contextlib.contextmanager
+def disk_state_lock():
+    lock_path = STATE_FILE + ".lock"
+    import time
+    start_time = time.time()
+    while True:
+        try:
+            os.mkdir(lock_path)
+            break
+        except FileExistsError:
+            if time.time() - start_time > 5.0:
+                try:
+                    os.rmdir(lock_path)
+                except Exception:
+                    pass
+            time.sleep(0.1)
+    try:
+        yield
+    finally:
+        try:
+            os.rmdir(lock_path)
+        except Exception:
+            pass
+
+def safe_read_state_file(fallback_state):
+    if os.path.exists(STATE_FILE):
+        try:
+            with disk_state_lock():
+                with open(STATE_FILE, "r") as f:
+                    return json.load(f)
+        except Exception:
+            pass
+    return fallback_state
+
 def load_state():
     global state
     with state_lock:
-        if os.path.exists(STATE_FILE):
-            try:
-                with open(STATE_FILE, "r") as f:
-                    state = json.load(f)
-            except Exception as e:
-                logger.error(f"Failed to load state file: {e}")
-                state = {"chats": {}, "global_last_signatures": {}}
-        else:
-            state = {"chats": {}, "global_last_signatures": {}}
+        state = safe_read_state_file({"chats": {}, "global_last_signatures": {}})
 
 def save_state_unlocked():
     try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(state, f, indent=2)
+        with disk_state_lock():
+            fresh_state = {"chats": {}, "global_last_signatures": {}}
+            if os.path.exists(STATE_FILE):
+                try:
+                    with open(STATE_FILE, "r") as f:
+                        fresh_state = json.load(f)
+                except Exception:
+                    pass
+            
+            fresh_state["global_last_signatures"] = state.get("global_last_signatures", {})
+            for chat_id, chat_data in state.get("chats", {}).items():
+                if chat_id not in fresh_state["chats"]:
+                    fresh_state["chats"][chat_id] = chat_data
+                else:
+                    fresh_state["chats"][chat_id].update(chat_data)
+            
+            state.update(fresh_state)
+            with open(STATE_FILE, "w") as f:
+                json.dump(state, f, indent=2)
     except Exception as e:
         logger.error(f"Failed to save state file: {e}")
 
@@ -665,14 +710,7 @@ def format_status_report(chat_id, clear_after=False):
     if clear_after:
         with state_lock:
             # We fetch state from file to prevent concurrent overwrite issues
-            if os.path.exists(STATE_FILE):
-                try:
-                    with open(STATE_FILE, "r") as f:
-                        current_state = json.load(f)
-                except Exception:
-                    current_state = state
-            else:
-                current_state = state
+            current_state = safe_read_state_file(state)
                 
             cid_str = str(chat_id)
             if cid_str in current_state.get("chats", {}):
@@ -994,14 +1032,7 @@ def flush_accumulated_txs(chat_id):
     send_chat_summary(chat_id, chat_data)
     
     with state_lock:
-        if os.path.exists(STATE_FILE):
-            try:
-                with open(STATE_FILE, "r") as f:
-                    current_state = json.load(f)
-            except Exception:
-                current_state = state
-        else:
-            current_state = state
+        current_state = safe_read_state_file(state)
             
         chat_state = current_state.get("chats", {}).get(chat_id_str, {})
         current_txs = chat_state.get("accumulated_txs", [])
@@ -1566,14 +1597,7 @@ def summary_scheduler_loop():
                 send_chat_summary(chat_id, chat_data)
                 
                 with state_lock:
-                    if os.path.exists(STATE_FILE):
-                        try:
-                            with open(STATE_FILE, "r") as f:
-                                current_state = json.load(f)
-                        except Exception:
-                            current_state = state
-                    else:
-                        current_state = state
+                    current_state = safe_read_state_file(state)
                         
                     chat_state = current_state.get("chats", {}).get(str(chat_id), {})
                     current_txs = chat_state.get("accumulated_txs", [])
@@ -1596,14 +1620,7 @@ def summary_scheduler_loop():
                     logger.error(f"Scheduled status report failed for chat {chat_id}: {e}")
                     # Prevent spinning if report repeatedly fails
                     with state_lock:
-                        if os.path.exists(STATE_FILE):
-                            try:
-                                with open(STATE_FILE, "r") as f:
-                                    current_state = json.load(f)
-                            except Exception:
-                                current_state = state
-                        else:
-                            current_state = state
+                        current_state = safe_read_state_file(state)
                         cid_str = str(chat_id)
                         if cid_str in current_state.get("chats", {}):
                             current_state["chats"][cid_str]["last_status_time"] = time.time()

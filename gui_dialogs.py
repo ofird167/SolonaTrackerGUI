@@ -1,32 +1,40 @@
+import sys
 import re
 import tkinter as tk
 from tkinter import ttk
-from gui_styles import (
-    BG_MAIN, BG_CARD, TEXT_COLOR, TEXT_MUTED, 
-    ACCENT_GREEN, ACCENT_BLUE, ACCENT_RED, BORDER_COLOR
-)
+import gui_styles
+
+def apply_dark_title_bar(window):
+    if sys.platform == "win32":
+        import ctypes
+        try:
+            window.update_idletasks()
+            hwnd = window.winfo_id()
+            is_dark = (gui_styles.BG_MAIN == "#121214")
+            rendering = ctypes.c_int(1 if is_dark else 0)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(rendering), ctypes.sizeof(rendering))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(rendering), ctypes.sizeof(rendering))
+        except Exception:
+            pass
 
 class CustomMessageDialog(tk.Toplevel):
-    def __init__(self, parent, title, message, dialog_type="info"):
+    def __init__(self, parent, title, message, dialog_type="info", tr=None):
         super().__init__(parent)
+        self.tr = tr or (lambda k: k)
         self.title(title)
         
         # Decide sizing and resizability based on message length
         is_long_message = len(message) > 180
         if is_long_message:
-            self.geometry("550x300")
+            self.geometry("550x320")
             self.resizable(True, True)
         else:
-            self.geometry("400x180")
+            self.geometry("450x220")
             self.resizable(False, False)
             
-        self.configure(bg=BG_MAIN)
+        self.configure(bg=gui_styles.BG_MAIN)
         self.transient(parent)
         self.grab_set()
-        
-        # Border
-        self.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
-        self.overrideredirect(True)
         
         # Center dialog
         self.update_idletasks()
@@ -39,70 +47,43 @@ class CustomMessageDialog(tk.Toplevel):
         x = px + (pw - dw) // 2
         y = py + (ph - dh) // 2
         self.geometry(f"+{x}+{y}")
+        
+        # Inherit application icon
+        try:
+            if hasattr(parent, 'icon_img_small') and parent.icon_img_small:
+                self.iconphoto(True, parent.icon_img_small, parent.icon_img)
+            elif hasattr(parent, 'icon_img') and parent.icon_img:
+                self.iconphoto(True, parent.icon_img)
+        except Exception:
+            pass
+            
+        apply_dark_title_bar(self)
         self.lift()
         self.attributes("-topmost", True)
         self.focus_force()
         
-        # Title bar
-        title_bar = tk.Frame(self, bg=BG_CARD, height=30)
-        title_bar.pack(fill=tk.X, side=tk.TOP)
-        
-        lbl_title = tk.Label(title_bar, text=title, bg=BG_CARD, fg=TEXT_COLOR, font=("Helvetica", 9, "bold"))
-        lbl_title.pack(side=tk.LEFT, padx=10)
-        
-        btn_close = tk.Button(
-            title_bar, 
-            text="✕", 
-            bg=BG_CARD, 
-            fg=TEXT_MUTED, 
-            activebackground=ACCENT_RED, 
-            activeforeground="#ffffff", 
-            bd=0, 
-            font=("Helvetica", 9), 
-            command=self.destroy,
-            width=3,
-            relief=tk.FLAT
-        )
-        btn_close.pack(side=tk.RIGHT, fill=tk.Y)
-        btn_close.bind("<Enter>", lambda e: btn_close.config(bg=ACCENT_RED, fg="#ffffff"))
-        btn_close.bind("<Leave>", lambda e: btn_close.config(bg=BG_CARD, fg=TEXT_MUTED))
-        
-        # Dragging logic
-        def start_move(e):
-            self.x = e.x
-            self.y = e.y
-        def drag(e):
-            deltax = e.x - self.x
-            deltay = e.y - self.y
-            self.geometry(f"+{self.winfo_x() + deltax}+{self.winfo_y() + deltay}")
-        title_bar.bind("<ButtonPress-1>", start_move)
-        title_bar.bind("<B1-Motion>", drag)
-        lbl_title.bind("<ButtonPress-1>", start_move)
-        lbl_title.bind("<B1-Motion>", drag)
-        
-        # Symbols mapping to avoid emoji box issues on Linux
+        # Symbols mapping
         color_map = {
-            "info": ACCENT_BLUE,
-            "error": ACCENT_RED,
+            "info": gui_styles.ACCENT_BLUE,
+            "error": gui_styles.ACCENT_RED,
             "warning": "#fbbf24"
         }
         symbol_map = {
-            "info": "[i]",
-            "error": "[!]",
-            "warning": "[!]"
+            "info": "🟢" if dialog_type == "info" else "[i]",
+            "error": "❌" if dialog_type == "error" else "[!]",
+            "warning": "⚠️" if dialog_type == "warning" else "[!]"
         }
-        accent_color = color_map.get(dialog_type, ACCENT_BLUE)
+        accent_color = color_map.get(dialog_type, gui_styles.ACCENT_BLUE)
         accent_symbol = symbol_map.get(dialog_type, "[i]")
         
-        content_frame = tk.Frame(self, bg=BG_MAIN)
+        content_frame = tk.Frame(self, bg=gui_styles.BG_MAIN)
         content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=15)
         
-        lbl_icon = tk.Label(content_frame, text=accent_symbol, bg=BG_MAIN, fg=accent_color, font=("Courier", 18, "bold"))
+        lbl_icon = tk.Label(content_frame, text=accent_symbol, bg=gui_styles.BG_MAIN, fg=accent_color, font=("Courier", gui_styles.FONT_SIZE + 10, "bold"))
         lbl_icon.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 15))
         
         if is_long_message:
-            # Use scrollable Text box for long logs or stack traces
-            text_frame = tk.Frame(content_frame, bg=BG_MAIN)
+            text_frame = tk.Frame(content_frame, bg=gui_styles.BG_MAIN)
             text_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             
             scrollbar = ttk.Scrollbar(text_frame)
@@ -110,9 +91,9 @@ class CustomMessageDialog(tk.Toplevel):
             
             msg_text = tk.Text(
                 text_frame, 
-                bg=BG_MAIN, 
-                fg=TEXT_COLOR, 
-                font=("Helvetica", 10), 
+                bg=gui_styles.BG_MAIN, 
+                fg=gui_styles.TEXT_COLOR, 
+                font=("Helvetica", gui_styles.FONT_SIZE), 
                 wrap=tk.WORD, 
                 bd=0, 
                 highlightthickness=0,
@@ -124,32 +105,37 @@ class CustomMessageDialog(tk.Toplevel):
             msg_text.insert(tk.END, message)
             msg_text.config(state=tk.DISABLED)
         else:
-            msg_lbl = tk.Label(content_frame, text=message, bg=BG_MAIN, fg=TEXT_COLOR, justify=tk.LEFT, font=("Helvetica", 10), wraplength=300)
+            msg_lbl = tk.Label(
+                content_frame, 
+                text=message, 
+                bg=gui_styles.BG_MAIN, 
+                fg=gui_styles.TEXT_COLOR, 
+                justify=tk.LEFT, 
+                font=("Helvetica", gui_styles.FONT_SIZE + 2 if not is_long_message else gui_styles.FONT_SIZE), 
+                wraplength=340
+            )
             msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.W)
         
-        btn_frame = tk.Frame(self, bg=BG_MAIN, pady=10)
+        btn_frame = tk.Frame(self, bg=gui_styles.BG_MAIN, pady=10)
         btn_frame.pack(fill=tk.X, side=tk.BOTTOM)
         
-        btn_ok = ttk.Button(btn_frame, text="OK", style="Blue.TButton", command=self.destroy, width=10)
+        btn_ok = ttk.Button(btn_frame, text=self.tr("ok"), style="Blue.TButton", command=self.destroy, width=10)
         btn_ok.pack(anchor=tk.CENTER)
         
         self.bind("<Return>", lambda e: self.destroy())
         self.bind("<Escape>", lambda e: self.destroy())
 
 class CustomConfirmDialog(tk.Toplevel):
-    def __init__(self, parent, title, message):
+    def __init__(self, parent, title, message, tr=None):
         super().__init__(parent)
+        self.tr = tr or (lambda k: k)
         self.title(title)
-        self.geometry("400x180")
+        self.geometry("450x220")
         self.resizable(False, False)
-        self.configure(bg=BG_MAIN)
+        self.configure(bg=gui_styles.BG_MAIN)
         self.transient(parent)
         self.grab_set()
         self.result = False
-        
-        # Border
-        self.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
-        self.overrideredirect(True)
         
         # Center dialog
         self.update_idletasks()
@@ -162,46 +148,44 @@ class CustomConfirmDialog(tk.Toplevel):
         x = px + (pw - dw) // 2
         y = py + (ph - dh) // 2
         self.geometry(f"+{x}+{y}")
+        
+        try:
+            if hasattr(parent, 'icon_img_small') and parent.icon_img_small:
+                self.iconphoto(True, parent.icon_img_small, parent.icon_img)
+            elif hasattr(parent, 'icon_img') and parent.icon_img:
+                self.iconphoto(True, parent.icon_img)
+        except Exception:
+            pass
+            
+        apply_dark_title_bar(self)
         self.lift()
         self.attributes("-topmost", True)
         self.focus_force()
         
-        # Title bar
-        title_bar = tk.Frame(self, bg=BG_CARD, height=30)
-        title_bar.pack(fill=tk.X, side=tk.TOP)
-        
-        lbl_title = tk.Label(title_bar, text=title, bg=BG_CARD, fg=TEXT_COLOR, font=("Helvetica", 9, "bold"))
-        lbl_title.pack(side=tk.LEFT, padx=10)
-        
-        # Dragging logic
-        def start_move(e):
-            self.x = e.x
-            self.y = e.y
-        def drag(e):
-            deltax = e.x - self.x
-            deltay = e.y - self.y
-            self.geometry(f"+{self.winfo_x() + deltax}+{self.winfo_y() + deltay}")
-        title_bar.bind("<ButtonPress-1>", start_move)
-        title_bar.bind("<B1-Motion>", drag)
-        lbl_title.bind("<ButtonPress-1>", start_move)
-        lbl_title.bind("<B1-Motion>", drag)
-        
-        content_frame = tk.Frame(self, bg=BG_MAIN)
+        content_frame = tk.Frame(self, bg=gui_styles.BG_MAIN)
         content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=15)
         
-        lbl_icon = tk.Label(content_frame, text="[?]", bg=BG_MAIN, fg=ACCENT_BLUE, font=("Courier", 18, "bold"))
+        lbl_icon = tk.Label(content_frame, text="❓", bg=gui_styles.BG_MAIN, fg=gui_styles.ACCENT_BLUE, font=("Courier", gui_styles.FONT_SIZE + 10, "bold"))
         lbl_icon.pack(side=tk.LEFT, anchor=tk.N, padx=(0, 15))
         
-        msg_lbl = tk.Label(content_frame, text=message, bg=BG_MAIN, fg=TEXT_COLOR, justify=tk.LEFT, font=("Helvetica", 10), wraplength=300)
+        msg_lbl = tk.Label(
+            content_frame, 
+            text=message, 
+            bg=gui_styles.BG_MAIN, 
+            fg=gui_styles.TEXT_COLOR, 
+            justify=tk.LEFT, 
+            font=("Helvetica", gui_styles.FONT_SIZE + 2), 
+            wraplength=340
+        )
         msg_lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor=tk.W)
         
-        btn_frame = tk.Frame(self, bg=BG_MAIN, pady=10)
+        btn_frame = tk.Frame(self, bg=gui_styles.BG_MAIN, pady=10)
         btn_frame.pack(fill=tk.X, side=tk.BOTTOM)
         
-        btn_no = ttk.Button(btn_frame, text="No", style="Gray.TButton", command=self.on_no, width=10)
+        btn_no = ttk.Button(btn_frame, text=self.tr("no"), style="Gray.TButton", command=self.on_no, width=10)
         btn_no.pack(side=tk.RIGHT, padx=(5, 20))
         
-        btn_yes = ttk.Button(btn_frame, text="Yes", style="Blue.TButton", command=self.on_yes, width=10)
+        btn_yes = ttk.Button(btn_frame, text=self.tr("yes"), style="Blue.TButton", command=self.on_yes, width=10)
         btn_yes.pack(side=tk.RIGHT)
         
         self.bind("<Return>", lambda e: self.on_yes())
@@ -216,36 +200,37 @@ class CustomConfirmDialog(tk.Toplevel):
         self.destroy()
 
 class MessageBoxWrapper:
-    def __init__(self, root):
+    def __init__(self, root, tr=None):
         self.root = root
+        self.tr = tr or (lambda k: k)
         
     def showinfo(self, title, message):
-        CustomMessageDialog(self.root, title, message, "info")
+        CustomMessageDialog(self.root, title, message, "info", tr=self.tr)
         
     def showerror(self, title, message):
-        CustomMessageDialog(self.root, title, message, "error")
+        CustomMessageDialog(self.root, title, message, "error", tr=self.tr)
         
     def showwarning(self, title, message):
-        CustomMessageDialog(self.root, title, message, "warning")
+        CustomMessageDialog(self.root, title, message, "warning", tr=self.tr)
         
     def askyesno(self, title, message):
-        dialog = CustomConfirmDialog(self.root, title, message)
+        dialog = CustomConfirmDialog(self.root, title, message, tr=self.tr)
         self.root.wait_window(dialog)
         return dialog.result
 
 class CustomAddAddressDialog(tk.Toplevel):
-    def __init__(self, parent, addr_type, title="Add Tracked Address"):
+    def __init__(self, parent, addr_type, title=None, tr=None):
         super().__init__(parent)
+        self.tr = tr or (lambda k: k)
+        
+        if title is None:
+            title = self.tr("add_user_wallet_title") if addr_type == "user" else self.tr("add_token_account_title")
         self.title(title)
-        self.geometry("450x245")
+        self.geometry("450x260")
         self.resizable(False, False)
-        self.configure(bg=BG_MAIN)
+        self.configure(bg=gui_styles.BG_MAIN)
         self.transient(parent)
         self.grab_set()
-        
-        # Border and borderless
-        self.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
-        self.overrideredirect(True)
         
         self.addr_type = addr_type
         self.result = None
@@ -260,90 +245,70 @@ class CustomAddAddressDialog(tk.Toplevel):
         x = px + (pw - dw) // 2
         y = py + (ph - dh) // 2
         self.geometry(f"+{x}+{y}")
+        
+        try:
+            if hasattr(parent, 'icon_img_small') and parent.icon_img_small:
+                self.iconphoto(True, parent.icon_img_small, parent.icon_img)
+            elif hasattr(parent, 'icon_img') and parent.icon_img:
+                self.iconphoto(True, parent.icon_img)
+        except Exception:
+            pass
+            
+        apply_dark_title_bar(self)
         self.lift()
         self.attributes("-topmost", True)
         self.focus_force()
         
-        # Custom Title Bar
-        title_bar = tk.Frame(self, bg=BG_CARD, height=30)
-        title_bar.pack(fill=tk.X, side=tk.TOP)
-        
-        lbl_title_bar = tk.Label(title_bar, text=title, bg=BG_CARD, fg=TEXT_COLOR, font=("Helvetica", 9, "bold"))
-        lbl_title_bar.pack(side=tk.LEFT, padx=10)
-        
-        btn_close = tk.Button(
-            title_bar, 
-            text="✕", 
-            bg=BG_CARD, 
-            fg=TEXT_MUTED, 
-            activebackground=ACCENT_RED, 
-            activeforeground="#ffffff", 
-            bd=0, 
-            font=("Helvetica", 9), 
-            command=self.destroy,
-            width=3,
-            relief=tk.FLAT
-        )
-        btn_close.pack(side=tk.RIGHT, fill=tk.Y)
-        btn_close.bind("<Enter>", lambda e: btn_close.config(bg=ACCENT_RED, fg="#ffffff"))
-        btn_close.bind("<Leave>", lambda e: btn_close.config(bg=BG_CARD, fg=TEXT_MUTED))
-        
-        # Dragging logic
-        def start_move(e):
-            self.x = e.x
-            self.y = e.y
-        def drag(e):
-            deltax = e.x - self.x
-            deltay = e.y - self.y
-            self.geometry(f"+{self.winfo_x() + deltax}+{self.winfo_y() + deltay}")
-        title_bar.bind("<ButtonPress-1>", start_move)
-        title_bar.bind("<B1-Motion>", drag)
-        lbl_title_bar.bind("<ButtonPress-1>", start_move)
-        lbl_title_bar.bind("<B1-Motion>", drag)
-        
         # Main form UI
-        lbl_title = ttk.Label(self, text=f"Add {'User Wallet' if addr_type == 'user' else 'Token Account'}", font=("Helvetica", 12, "bold"), background=BG_MAIN, foreground=TEXT_COLOR)
+        header_text = self.tr("add_user_wallet_title") if addr_type == "user" else self.tr("add_token_account_title")
+        lbl_title = ttk.Label(
+            self, 
+            text=header_text, 
+            font=("Helvetica", gui_styles.FONT_SIZE + 2, "bold"), 
+            background=gui_styles.BG_MAIN, 
+            foreground=gui_styles.TEXT_COLOR
+        )
         lbl_title.pack(anchor=tk.W, padx=20, pady=(15, 10))
         
-        form_frame = tk.Frame(self, bg=BG_MAIN)
+        form_frame = tk.Frame(self, bg=gui_styles.BG_MAIN)
         form_frame.pack(fill=tk.X, padx=20, pady=5)
         
-        ttk.Label(form_frame, text="Solana Address:", background=BG_MAIN, foreground=TEXT_COLOR).grid(row=0, column=0, sticky=tk.W, pady=5)
+        ttk.Label(form_frame, text=self.tr("solana_address"), background=gui_styles.BG_MAIN, foreground=gui_styles.TEXT_COLOR).grid(row=0, column=0, sticky=tk.W, pady=5)
         self.addr_var = tk.StringVar()
-        self.addr_entry = tk.Entry(form_frame, textvariable=self.addr_var, bg=BG_CARD, fg=TEXT_COLOR, insertbackground=TEXT_COLOR, bd=1, relief=tk.SOLID, width=35)
+        self.addr_entry = tk.Entry(form_frame, textvariable=self.addr_var, bg=gui_styles.BG_CARD, fg=gui_styles.TEXT_COLOR, insertbackground=gui_styles.TEXT_COLOR, bd=1, relief=tk.SOLID, width=32, font=("Helvetica", gui_styles.FONT_SIZE))
         self.addr_entry.grid(row=0, column=1, padx=(10, 0), pady=5)
         self.addr_entry.focus()
         
-        ttk.Label(form_frame, text="Custom Name:", background=BG_MAIN, foreground=TEXT_COLOR).grid(row=1, column=0, sticky=tk.W, pady=5)
+        ttk.Label(form_frame, text=self.tr("custom_name"), background=gui_styles.BG_MAIN, foreground=gui_styles.TEXT_COLOR).grid(row=1, column=0, sticky=tk.W, pady=5)
         self.name_var = tk.StringVar()
-        self.name_entry = tk.Entry(form_frame, textvariable=self.name_var, bg=BG_CARD, fg=TEXT_COLOR, insertbackground=TEXT_COLOR, bd=1, relief=tk.SOLID, width=35)
+        self.name_entry = tk.Entry(form_frame, textvariable=self.name_var, bg=gui_styles.BG_CARD, fg=gui_styles.TEXT_COLOR, insertbackground=gui_styles.TEXT_COLOR, bd=1, relief=tk.SOLID, width=32, font=("Helvetica", gui_styles.FONT_SIZE))
         self.name_entry.grid(row=1, column=1, padx=(10, 0), pady=5)
         
-        self.err_lbl = ttk.Label(form_frame, text="", background=BG_MAIN, foreground=ACCENT_RED, font=("Helvetica", 8))
+        self.err_lbl = ttk.Label(form_frame, text="", background=gui_styles.BG_MAIN, foreground=gui_styles.ACCENT_RED, font=("Helvetica", gui_styles.FONT_SIZE - 2 if gui_styles.FONT_SIZE > 9 else 8))
         self.err_lbl.grid(row=2, column=1, sticky=tk.W, padx=(10, 0))
         
-        btn_frame = tk.Frame(self, bg=BG_MAIN)
+        btn_frame = tk.Frame(self, bg=gui_styles.BG_MAIN)
         btn_frame.pack(fill=tk.X, padx=20, pady=(15, 0), side=tk.BOTTOM)
         
-        btn_cancel = ttk.Button(btn_frame, text="Cancel", style="Gray.TButton", command=self.destroy, width=10)
+        btn_cancel = ttk.Button(btn_frame, text=self.tr("cancel"), style="Gray.TButton", command=self.destroy, width=10)
         btn_cancel.pack(side=tk.RIGHT, padx=(5, 0))
         
-        btn_add = ttk.Button(btn_frame, text="Add", style="Green.TButton", command=self.validate_and_submit, width=10)
+        btn_add = ttk.Button(btn_frame, text=self.tr("add"), style="Green.TButton", command=self.validate_and_submit, width=10)
         btn_add.pack(side=tk.RIGHT)
         
         self.bind("<Return>", lambda e: self.validate_and_submit())
         self.bind("<Escape>", lambda e: self.destroy())
-
+ 
     def validate_and_submit(self):
         address = self.addr_var.get().strip()
         name = self.name_var.get().strip()
         
         if not address:
-            self.err_lbl.config(text="Address cannot be empty.")
+            self.err_lbl.config(text=self.tr("err_address_empty"))
             return
             
         if not re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", address):
-            self.err_lbl.config(text="Invalid Solana address format.")
+            self.err_lbl.config(text=self.tr("err_invalid_solana_addr"))
             return
             
         if not name:

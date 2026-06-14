@@ -84,17 +84,17 @@ rmdir /s /q dist
 del /q tracker.spec
 del /q configurator.spec
 
+:: Create ZIP archive using PowerShell
+echo.
+echo Creating release ZIP archive...
+powershell -Command "Compress-Archive -Path 'release' -DestinationPath 'solana-wallet-tracker-windows.zip' -Force"
+
 echo.
 echo ==============================================
 echo   Build Successful! 
-echo   Generated files in "release" folder:
-echo   - release\configurator.exe (Configuration Panel GUI)
-echo   - release\tracker.exe      (Background Bot Worker)
-echo   - release\secrets\example.env
-echo.
-echo   You can zip and copy the "release" folder
-echo   to your friend's PC. They only need to run
-echo   "configurator.exe" inside the release folder!
+echo   Generated release archive:
+echo   - solana-wallet-tracker-windows.zip
+echo   (Unzipping this file contains the release folder)
 echo ==============================================
 echo.
 pause

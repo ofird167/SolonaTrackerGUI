@@ -7,10 +7,12 @@ import subprocess
 import threading
 import requests
 import tkinter as tk
-from tkinter import ttk, simpledialog, filedialog
+from tkinter import ttk, filedialog
+import gui_styles
+from gui_styles import APP_ICON_BASE64, setup_styles
+from gui_dialogs import MessageBoxWrapper, CustomAddAddressDialog
 
 messagebox = None
-
 
 # Paths
 if getattr(sys, 'frozen', False):
@@ -21,44 +23,380 @@ ENV_PATH = os.path.join(BASE_DIR, "secrets", ".env")
 STATE_PATH = os.path.join(BASE_DIR, "secrets", "tracked.json")
 LOG_PATH = os.path.join(BASE_DIR, "logs", "tracker.log")
 
-from gui_styles import (
-    BG_MAIN, BG_CARD, TEXT_COLOR, TEXT_MUTED,
-    ACCENT_GREEN, ACCENT_BLUE, ACCENT_RED, BORDER_COLOR,
-    APP_ICON_BASE64, setup_styles
-)
-from gui_dialogs import (
-    CustomMessageDialog, CustomConfirmDialog, MessageBoxWrapper, CustomAddAddressDialog
-)
+FONT_SIZES = {
+    "Small": 8,
+    "Medium": 10,
+    "Large": 12
+}
+
+TRANSLATIONS = {
+    "English": {
+        "title": "Solana Telegram Tracker Configurator",
+        "success": "Success",
+        "error": "Error",
+        "settings_credentials": " Credentials & Preferences ",
+        "wallet_manager": " Wallet Manager ",
+        "live_console": " Live Console & Logs ",
+        "backup_license": " Backup & License ",
+        "app_settings": " App Settings ",
+        "connection_credentials": "Connection Credentials",
+        "telegram_token": "Telegram Token:",
+        "telegram_chat_id": "Telegram Chat ID:",
+        "solana_rpc_url": "Solana RPC URL:",
+        "test_connections": "Test Connections",
+        "save_connection": "Save Connection",
+        "bot_preferences": "Bot Preferences",
+        "default_currency": "Default Currency:",
+        "summary_interval": "Summary Interval:",
+        "save_preferences": "Save Preferences",
+        "status_interval": "Status Interval:",
+        "whale_threshold": "Whale Threshold (%):",
+        "show_coin_link": "Show Coin Link (Dexscreener)",
+        "show_market_cap": "Show Market Cap",
+        "auto_start": "Auto-start Tracker Bot on launch (Skips UI clicking & Telegram /start)",
+        "wallet_address_manager": "Wallet Address Manager (Requires Chat ID to be saved)",
+        "user_wallets": "User Wallets (Tracks All Tokens)",
+        "add_wallet": "Add Wallet",
+        "copy": "Copy",
+        "remove": "Remove",
+        "token_accounts": "Token Accounts (Tracks Single Token)",
+        "add_token_account": "Add Token Account",
+        "start_bot": "Start Tracker Bot",
+        "stop_bot": "Stop Tracker Bot",
+        "clear_console": "Clear Console",
+        "exit": "Exit",
+        "status_stopped": "● Status: Stopped",
+        "status_running": "● Running | Uptime: {uptime}",
+        "backup_restore": "Backup & Restore",
+        "export_list": "Export Tracked List",
+        "import_list": "Import Tracked List",
+        "about_license": "About & Open Source License",
+        "ui_settings_title": "UI & Environment Settings",
+        "language": "Language:",
+        "font_size": "Font Size:",
+        "theme": "Theme Mode:",
+        "save_settings": "Save Settings",
+        "hint_chat_id": "Hint: Group Chat IDs usually begin with a minus sign (e.g. -100123456789)",
+        "show": "Show",
+        "hide": "Hide",
+        "testing": "Testing...",
+        "auto_scroll": "Auto-scroll",
+        "copied": "Address copied to clipboard!",
+        "backup_desc": "Export or import your list of tracked wallets to backup your settings or sync configuration across files.",
+        "success_pref": "Preferences saved successfully.",
+        "success_conn": "Connection parameters saved successfully.",
+        "success_import": "Configuration successfully imported and merged.",
+        "success_export": "Configuration successfully exported to: ",
+        "add_user_wallet_success": "Added wallet: {name}",
+        "remove_wallet_success": "Removed wallet: {name}",
+        "launch_success": "Tracker process launched.",
+        "setting_saved_success": "Settings saved and applied successfully!",
+        "validation_error": "Validation Error",
+        "test_error": "Test Error",
+        "token_required": "Telegram Bot Token is required to run connection tests.",
+        "chat_id_required": "Please save a Telegram Chat ID first.",
+        "token_empty": "Telegram Token cannot be empty.",
+        "token_warning_title": "Validation Warning",
+        "token_warning_msg": "The Telegram Bot Token format looks unusual.\nFormat is typically digits:chars (e.g. 1234567:ABCabc...).\nAre you sure you want to save it?",
+        "chat_id_numeric": "Telegram Chat ID must be a numeric value.\nGroup Chat IDs typically start with a minus sign (e.g., -100123456789).",
+        "rpc_invalid": "Invalid RPC URL: '{url}'.\nMust start with http:// or https://",
+        "summary_interval_pos": "Summary Interval must be a positive integer.",
+        "status_interval_pos": "Status Interval must be a positive integer.",
+        "whale_threshold_pos": "Whale Threshold must be a positive number.",
+        "import_confirm_title": "Confirm Import",
+        "import_confirm_msg": "This will merge/overwrite your current tracked configuration with the backup file.\nAre you sure you want to proceed?",
+        "import_schema_error": "Invalid backup file schema: missing 'chats' object.",
+        "wallet_required": "Please select a wallet address to remove.",
+        "wallet_confirm_title": "Confirm Removal",
+        "wallet_confirm_msg": "Are you sure you want to remove the tracking configuration for '{name}'?",
+        "process_error": "Process Error",
+        "process_running": "Tracker bot is already running.",
+        "execution_error": "Execution Error",
+        "launch_failed": "Failed to start tracker: {error}",
+        "ok": "OK",
+        "yes": "Yes",
+        "no": "No",
+        "cancel": "Cancel",
+        "add": "Add",
+        "add_user_wallet_title": "Add User Wallet",
+        "add_token_account_title": "Add Token Account",
+        "solana_address": "Solana Address:",
+        "custom_name": "Custom Name:",
+        "err_address_empty": "Address cannot be empty.",
+        "err_invalid_solana_addr": "Invalid Solana address format.",
+        "config_error": "Configuration Error",
+        "save_error": "Save Error",
+        "failed_save_state": "Failed to save tracked.json state: {error}",
+        "conn_test_success": "Connection Test Success",
+        "conn_test_failure": "Connection Test Failure",
+        "failed_save_env": "Failed to save environment variables: {error}",
+        "selection_error": "Selection Error",
+        "export_warning": "Export Warning",
+        "no_tracked_addresses": "No tracked addresses to export.",
+        "export_failed": "Failed to export configuration: {error}",
+        "import_failed": "Failed to import configuration: {error}",
+        "token_save_first": "Please save a Telegram Bot Token first."
+    },
+    "Russian": {
+        "title": "Панель Отслеживания Solana Кошельков",
+        "success": "Успех",
+        "error": "Ошибка",
+        "settings_credentials": " Настройки и Данные ",
+        "wallet_manager": " Менеджер Кошельков ",
+        "live_console": " Консоль и Логи ",
+        "backup_license": " Бэкап и Лицензия ",
+        "app_settings": " Настройки Интерфейса ",
+        "connection_credentials": "Учетные Данные Подключения",
+        "telegram_token": "Токен Telegram:",
+        "telegram_chat_id": "Chat ID Telegram:",
+        "solana_rpc_url": "Solana RPC URL:",
+        "test_connections": "Проверить Подключение",
+        "save_connection": "Сохранить Подключение",
+        "bot_preferences": "Настройки Бота",
+        "default_currency": "Валюта по умолчанию:",
+        "summary_interval": "Интервал Сводок:",
+        "save_preferences": "Сохранить Настройки",
+        "status_interval": "Интервал Статуса:",
+        "whale_threshold": "Порог Китов (%):",
+        "show_coin_link": "Ссылка на Монету (Dexscreener)",
+        "show_market_cap": "Показывать Капитализацию",
+        "auto_start": "Автозапуск бота при старте",
+        "wallet_address_manager": "Управление Адресами Кошельков",
+        "user_wallets": "Пользовательские Кошельки",
+        "add_wallet": "Добавить Кошелек",
+        "copy": "Копировать",
+        "remove": "Удалить",
+        "token_accounts": "Аккаунты Токенов",
+        "add_token_account": "Добавить Аккаунт Токена",
+        "start_bot": "Запустить Бота",
+        "stop_bot": "Остановить Бота",
+        "clear_console": "Очистить Консоль",
+        "exit": "Выход",
+        "status_stopped": "● Статус: Остановлен",
+        "status_running": "● Запущен | Время: {uptime}",
+        "backup_restore": "Резервное Копирование",
+        "export_list": "Экспорт Списка",
+        "import_list": "Импорт Списка",
+        "about_license": "О Программе и Лицензии",
+        "ui_settings_title": "Настройки Интерфейса",
+        "language": "Язык:",
+        "font_size": "Размер Шрифта:",
+        "theme": "Тема Оформления:",
+        "save_settings": "Сохранить Настройки",
+        "hint_chat_id": "ID групп обычно начинаются с минуса (например, -100123456789)",
+        "show": "Показать",
+        "hide": "Скрыть",
+        "testing": "Проверка...",
+        "auto_scroll": "Автопрокрутка",
+        "copied": "Адрес скопирован в буфер обмена!",
+        "backup_desc": "Экспортируйте или импортируйте список отслеживаемых кошельков для резервного копирования настроек.",
+        "success_pref": "Настройки успешно сохранены.",
+        "success_conn": "Параметры подключения успешно сохранены.",
+        "success_import": "Конфигурация успешно импортирована и объединена.",
+        "success_export": "Конфигурация успешно экспортирована в: ",
+        "add_user_wallet_success": "Добавлен кошелек: {name}",
+        "remove_wallet_success": "Удален кошелек: {name}",
+        "launch_success": "Процесс отслеживания запущен.",
+        "setting_saved_success": "Настройки успешно сохранены и применены!",
+        "validation_error": "Ошибка валидации",
+        "test_error": "Ошибка проверки",
+        "token_required": "Токен Telegram бота обязателен для проверки подключения.",
+        "chat_id_required": "Сначала сохраните Telegram Chat ID.",
+        "token_empty": "Токен Telegram не может быть пустым.",
+        "token_warning_title": "Предупреждение валидации",
+        "token_warning_msg": "Формат токена Telegram бота выглядит необычно.\nОбычно формат: цифры:символы.\nВы уверены, что хотите сохранить?",
+        "chat_id_numeric": "Chat ID Telegram должен быть числовым.\nID групп обычно начинаются с минуса (например, -100123456789).",
+        "rpc_invalid": "Недопустимый RPC URL: '{url}'.\nДолжен начинаться с http:// или https://",
+        "summary_interval_pos": "Интервал сводок должен быть положительным целым числом.",
+        "status_interval_pos": "Интервал статуса должен быть положительным целым числом.",
+        "whale_threshold_pos": "Порог китов должен быть положительным числом.",
+        "import_confirm_title": "Подтвердить импорт",
+        "import_confirm_msg": "Это объединит/перезапишет вашу текущую конфигурацию с файлом бэкапа.\nПродолжить?",
+        "import_schema_error": "Неверная схема файла бэкапа: отсутствует объект 'chats'.",
+        "wallet_required": "Выберите кошелек для удаления.",
+        "wallet_confirm_title": "Подтвердить удаление",
+        "wallet_confirm_msg": "Вы уверены, что хотите прекратить отслеживание '{name}'?",
+        "process_error": "Ошибка процесса",
+        "process_running": "Бот-трекер уже запущен.",
+        "execution_error": "Ошибка выполнения",
+        "launch_failed": "Не удалось запустить трекер: {error}",
+        "ok": "ОК",
+        "yes": "Да",
+        "no": "Нет",
+        "cancel": "Отмена",
+        "add": "Добавить",
+        "add_user_wallet_title": "Добавить кошелек пользователя",
+        "add_token_account_title": "Добавить аккаунт токена",
+        "solana_address": "Адрес Solana:",
+        "custom_name": "Имя (необязательно):",
+        "err_address_empty": "Адрес не может быть пустым.",
+        "err_invalid_solana_addr": "Недопустимый формат адреса Solana.",
+        "config_error": "Ошибка конфигурации",
+        "save_error": "Ошибка сохранения",
+        "failed_save_state": "Не удалось сохранить состояние tracked.json: {error}",
+        "conn_test_success": "Проверка подключения успешна",
+        "conn_test_failure": "Ошибка проверки подключения",
+        "failed_save_env": "Не удалось сохранить переменные окружения: {error}",
+        "selection_error": "Ошибка выбора",
+        "export_warning": "Предупреждение экспорта",
+        "no_tracked_addresses": "Нет отслеживаемых адресов для экспорта.",
+        "export_failed": "Не удалось экспортировать конфигурацию: {error}",
+        "import_failed": "Не удалось импортировать конфигурацию: {error}",
+        "token_save_first": "Сначала сохраните токен Telegram бота."
+    },
+    "Arabic": {
+        "title": "لوحة تتبع محفظة سولانا",
+        "success": "نجاح",
+        "error": "خطأ",
+        "settings_credentials": " الإعدادات والاعتمادات ",
+        "wallet_manager": " مدير المحفظة ",
+        "live_console": " وحدة التحكم والسجلات ",
+        "backup_license": " النسخ الاحتياطي والترخيص ",
+        "app_settings": " إعدادات التطبيق ",
+        "connection_credentials": "بيانات الاتصال",
+        "telegram_token": "رمز تليجرام البوت:",
+        "telegram_chat_id": "معرف دردشة تليجرام:",
+        "solana_rpc_url": "رابط Solana RPC:",
+        "test_connections": "اختبار الاتصال",
+        "save_connection": "حفظ الاتصال",
+        "bot_preferences": "تفضيلات البوت",
+        "default_currency": "العملة الافتراضية:",
+        "summary_interval": "فترة الملخص:",
+        "save_preferences": "حفظ التفضيلات",
+        "status_interval": "فترة الحالة:",
+        "whale_threshold": "حد الحوت (%):",
+        "show_coin_link": "عرض رابط العملة (Dexscreener)",
+        "show_market_cap": "عرض القيمة السوقية",
+        "auto_start": "بدء تشغيل البوت تلقائيًا عند الإطلاق",
+        "wallet_address_manager": "مدير عناوين المحفظة",
+        "user_wallets": "محافظ المستخدم (جميع العملات)",
+        "add_wallet": "إضافة محفظة",
+        "copy": "نسخ",
+        "remove": "إزالة",
+        "token_accounts": "حسابات العملات (عملة واحدة)",
+        "add_token_account": "إضافة حساب عملة",
+        "start_bot": "تشغيل البوت",
+        "stop_bot": "إيقاف البوت",
+        "clear_console": "مسح وحدة التحكم",
+        "exit": "خروج",
+        "status_stopped": "● الحالة: متوقف",
+        "status_running": "● قيد التشغيل | الوقت: {uptime}",
+        "backup_restore": "النسخ الاحتياطي والاستعادة",
+        "export_list": "تصدير القائمة",
+        "import_list": "استيراد القائمة",
+        "about_license": "حول البرنامج والترخيص",
+        "ui_settings_title": "إعدادات واجهة المستخدم",
+        "language": "اللغة:",
+        "font_size": "حجم الخط:",
+        "theme": "مظهر المظهر:",
+        "save_settings": "حفظ الإعدادات",
+        "hint_chat_id": "تبدأ معرفات المجموعات عادةً بعلامة ناقص (مثل -100123456789)",
+        "show": "عرض",
+        "hide": "إخفاء",
+        "testing": "جاري الاختبار...",
+        "auto_scroll": "التمرير التلقائي",
+        "copied": "تم نسخ العنوان إلى الحافظة!",
+        "backup_desc": "قم بتصدير أو استيراد قائمة المحافظ المتعقبة للنسخ الاحتياطي للإعدادات.",
+        "success_pref": "تم حفظ التفضيلات بنجاح.",
+        "success_conn": "تم حفظ معلمات الاتصال بنجاح.",
+        "success_import": "تم استيراد التكوين ودمجه بنجاح.",
+        "success_export": "تم تصدير التكوين بنجاح إلى: ",
+        "add_user_wallet_success": "تمت إضافة المحفظة: {name}",
+        "remove_wallet_success": "تمت إزالة المحفظة: {name}",
+        "launch_success": "تم إطلاق عملية التتبع.",
+        "setting_saved_success": "تم حفظ الإعدادات وتطبيقها بنجاح!",
+        "validation_error": "خطأ في التحقق",
+        "test_error": "خطأ في الاختبار",
+        "token_required": "مطلوب رمز تليجرام البوت لتشغيل اختبارات الاتصال.",
+        "chat_id_required": "يرجى حفظ معرف دردشة تليجرام أولاً.",
+        "token_empty": "لا يمكن أن يكون رمز تليجرام فارغًا.",
+        "token_warning_title": "تحذير التحقق",
+        "token_warning_msg": "يبدو تنسيق رمز تليجرام البوت غير عادي.\nهل أنت متأكد أنك تريد حفظه؟",
+        "chat_id_numeric": "يجب أن يكون معرف دردشة تليجرام قيمة رقمية.\nتبدأ معرفات المجموعات عادةً بعلامة ناقص.",
+        "rpc_invalid": "رابط RPC غير صالح: '{url}'.\nيجب أن يبدأ بـ http:// أو https://",
+        "summary_interval_pos": "يجب أن يكون فاصل الملخص عددًا صحيحًا موجبًا.",
+        "status_interval_pos": "يجب أن يكون فاصل الحالة عددًا صحيحًا موجبًا.",
+        "whale_threshold_pos": "يجب أن يكون حد الحوت رقمًا موجبًا.",
+        "import_confirm_title": "تأكيد الاستيراد",
+        "import_confirm_msg": "سيؤدي هذا إلى دمج/كتابة التكوين الحالي فوقه بملف النسخ الاحتياطي.\nهل تريد المتابعة؟",
+        "import_schema_error": "مخطط ملف نسخ احتياطي غير صالح: مفقود كائن 'chats'.",
+        "wallet_required": "يرجى تحديد عنوان المحفظة لإزالته.",
+        "wallet_confirm_title": "تأكيد الإزالة",
+        "wallet_confirm_msg": "هل أنت متأكد أنك تريد إزالة تكوين التتبع لـ '{name}'؟",
+        "process_error": "خطأ في العملية",
+        "process_running": "بوت التتبع قيد التشغيل بالفعل.",
+        "execution_error": "خطأ في التنفيذ",
+        "launch_failed": "فشل بدء تشغيل التتبع: {error}",
+        "ok": "موافق",
+        "yes": "نعم",
+        "no": "لا",
+        "cancel": "إلغاء",
+        "add": "إضافة",
+        "add_user_wallet_title": "إضافة محفظة مستخدم",
+        "add_token_account_title": "إضافة حساب عملة",
+        "solana_address": "عنوان سولانا:",
+        "custom_name": "الاسم المخصص:",
+        "err_address_empty": "لا يمكن أن يكون العنوان فارغًا.",
+        "err_invalid_solana_addr": "تنسيق عنوان سولانا غير صالح.",
+        "config_error": "خطأ في التكوين",
+        "save_error": "خطأ في الحفظ",
+        "failed_save_state": "فشل حفظ حالة tracked.json: {error}",
+        "conn_test_success": "نجاح اختبار الاتصال",
+        "conn_test_failure": "فشل اختبار الاتصال",
+        "failed_save_env": "فشل حفظ متغيرات البيئة: {error}",
+        "selection_error": "خطأ في الاختيار",
+        "export_warning": "تحذير التصدير",
+        "no_tracked_addresses": "لا توجد عناوين متعقبة للتصدير.",
+        "export_failed": "فشل تصدير التكوين: {error}",
+        "import_failed": "فشل استيراد التكوين: {error}",
+        "token_save_first": "يرجى حفظ رمز تليجرام البوت أولاً."
+    }
+}
 
 class ConfiguratorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Solana Telegram Tracker Configurator")
         self.root.geometry("820x720")
-        self.root.configure(bg=BG_MAIN)
-        
-        # Borderless main window with custom border
-        self.root.overrideredirect(True)
-        self.root.config(bd=1, relief=tk.SOLID, highlightbackground=BORDER_COLOR, highlightcolor=ACCENT_BLUE)
-        
-        self.in_map_transition = False
-        self.root.bind("<Map>", self.on_map)
-        if sys.platform == "win32":
-            self.root.after(10, self.set_appwindow)
         
         # Custom messagebox wrapper
         global messagebox
-        messagebox = MessageBoxWrapper(self.root)
+        messagebox = MessageBoxWrapper(self.root, tr=self.tr)
         
         # Subprocess tracker
         self.tracker_process = None
         
-        # Load configs
+        # Load configs & state values
         self.token, self.chat_id, self.rpc_url, self.auto_start = self.load_env_values()
         self.state = self.load_state_values()
         
+        # Extract UI settings
+        self.settings = self.state.setdefault("settings", {
+            "language": "English",
+            "font_size": "Medium",
+            "theme": "Dark Mode"
+        })
+        
+        # Setup styles based on loaded settings
+        font_size_pt = FONT_SIZES.get(self.settings.get("font_size", "Medium"), 10)
+        setup_styles(font_size=font_size_pt, theme=self.settings.get("theme", "Dark Mode"), root=self.root)
+        
+        self.root.configure(bg=gui_styles.BG_MAIN)
+        
+        # Apply Windows Dark Title Bar natively if win32
+        if sys.platform == "win32":
+            import ctypes
+            try:
+                self.root.update_idletasks()
+                hwnd = self.root.winfo_id()
+                is_dark = (self.settings.get("theme", "Dark Mode") == "Dark Mode")
+                rendering = ctypes.c_int(1 if is_dark else 0)
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(rendering), ctypes.sizeof(rendering))
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(rendering), ctypes.sizeof(rendering))
+            except Exception:
+                pass
+        
         # Create UI
-        setup_styles()
         self.build_ui()
         
         # Process monitor loop
@@ -74,218 +412,153 @@ class ConfiguratorApp:
                     self.save_state()
             self.root.after(500, self.start_bot)
 
+    def tr(self, key):
+        lang = self.settings.get("language", "English")
+        return TRANSLATIONS.get(lang, TRANSLATIONS["English"]).get(key, TRANSLATIONS["English"].get(key, ""))
+
     def build_ui(self):
-        # Custom Title Bar
-        self.title_bar = tk.Frame(self.root, bg=BG_CARD, height=35)
-        self.title_bar.pack(fill=tk.X, side=tk.TOP)
-        
         try:
             self.icon_img = tk.PhotoImage(data=APP_ICON_BASE64)
-            lbl_icon_bar = tk.Label(self.title_bar, image=self.icon_img, bg=BG_CARD)
-            lbl_icon_bar.pack(side=tk.LEFT, padx=(10, 5))
-            self.root.iconphoto(True, self.icon_img)
+            self.icon_img_small = self.icon_img.subsample(16, 16)
+            self.root.iconphoto(True, self.icon_img_small, self.icon_img)
         except Exception:
             pass
-            
-        lbl_title = tk.Label(self.title_bar, text="Solana Telegram Tracker Configurator", bg=BG_CARD, fg=TEXT_COLOR, font=("Helvetica", 9, "bold"))
-        lbl_title.pack(side=tk.LEFT)
-        
-        # Window controls
-        btn_close = tk.Button(
-            self.title_bar, 
-            text="✕", 
-            bg=BG_CARD, 
-            fg=TEXT_MUTED, 
-            activebackground=ACCENT_RED, 
-            activeforeground="#ffffff", 
-            bd=0, 
-            font=("Helvetica", 9), 
-            command=self.clean_exit,
-            width=5,
-            relief=tk.FLAT
-        )
-        btn_close.pack(side=tk.RIGHT, fill=tk.Y)
-        btn_close.bind("<Enter>", lambda e: btn_close.config(bg=ACCENT_RED, fg="#ffffff"))
-        btn_close.bind("<Leave>", lambda e: btn_close.config(bg=BG_CARD, fg=TEXT_MUTED))
-        
-        self.is_maximized = False
-        self.normal_geom = "820x720"
-        
-        btn_max = tk.Button(
-            self.title_bar, 
-            text="🗖", 
-            bg=BG_CARD, 
-            fg=TEXT_MUTED, 
-            activebackground="#29292e", 
-            activeforeground=TEXT_COLOR, 
-            bd=0, 
-            font=("Helvetica", 9), 
-            command=self.toggle_maximize,
-            width=5,
-            relief=tk.FLAT
-        )
-        btn_max.pack(side=tk.RIGHT, fill=tk.Y)
-        btn_max.bind("<Enter>", lambda e: btn_max.config(bg="#2d2d30", fg=TEXT_COLOR))
-        btn_max.bind("<Leave>", lambda e: btn_max.config(bg=BG_CARD, fg=TEXT_MUTED))
-        
-        btn_min = tk.Button(
-            self.title_bar, 
-            text="—", 
-            bg=BG_CARD, 
-            fg=TEXT_MUTED, 
-            activebackground="#29292e", 
-            activeforeground=TEXT_COLOR, 
-            bd=0, 
-            font=("Helvetica", 9), 
-            command=self.minimize_window,
-            width=5,
-            relief=tk.FLAT
-        )
-        btn_min.pack(side=tk.RIGHT, fill=tk.Y)
-        btn_min.bind("<Enter>", lambda e: btn_min.config(bg="#2d2d30", fg=TEXT_COLOR))
-        btn_min.bind("<Leave>", lambda e: btn_min.config(bg=BG_CARD, fg=TEXT_MUTED))
-        
-        # Dragging logic
-        def start_move(e):
-            self.drag_x = e.x
-            self.drag_y = e.y
-        def drag(e):
-            if self.is_maximized:
-                self.toggle_maximize()
-            deltax = e.x - self.drag_x
-            deltay = e.y - self.drag_y
-            x = self.root.winfo_x() + deltax
-            y = self.root.winfo_y() + deltay
-            self.root.geometry(f"+{x}+{y}")
-            
-        self.title_bar.bind("<ButtonPress-1>", start_move)
-        self.title_bar.bind("<B1-Motion>", drag)
-        lbl_title.bind("<ButtonPress-1>", start_move)
-        lbl_title.bind("<B1-Motion>", drag)
 
         # Configure min size of root window
         self.root.minsize(800, 600)
         
         # Main Container Frame
-        self.main_container = tk.Frame(self.root, bg=BG_MAIN, padx=15, pady=10)
+        self.main_container = tk.Frame(self.root, bg=gui_styles.BG_MAIN, padx=15, pady=10)
         self.main_container.pack(fill=tk.BOTH, expand=True)
         
         # Header Title
-        title_lbl = ttk.Label(self.main_container, text="🧿 Solana Wallet Tracker Panel", style="Header.TLabel")
-        title_lbl.pack(anchor=tk.W, pady=(0, 10))
+        self.title_lbl = ttk.Label(self.main_container, text=self.tr("title"), style="Header.TLabel")
+        self.title_lbl.pack(anchor=tk.W, pady=(0, 10))
         
         # Notebook Tab Container
         self.notebook = ttk.Notebook(self.main_container)
         self.notebook.pack(fill=tk.BOTH, expand=True)
+        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
         
-        self.tab_settings = tk.Frame(self.notebook, bg=BG_MAIN, padx=10, pady=10)
-        self.tab_wallets = tk.Frame(self.notebook, bg=BG_MAIN, padx=10, pady=10)
-        self.tab_logs = tk.Frame(self.notebook, bg=BG_MAIN, padx=10, pady=10)
-        self.tab_backup = tk.Frame(self.notebook, bg=BG_MAIN, padx=10, pady=10)
+        self.tab_settings = tk.Frame(self.notebook, bg=gui_styles.BG_MAIN, padx=10, pady=10)
+        self.tab_wallets = tk.Frame(self.notebook, bg=gui_styles.BG_MAIN, padx=10, pady=10)
+        self.tab_logs = tk.Frame(self.notebook, bg=gui_styles.BG_MAIN, padx=10, pady=10)
+        self.tab_ui_settings = tk.Frame(self.notebook, bg=gui_styles.BG_MAIN, padx=10, pady=10)
+        self.tab_backup = tk.Frame(self.notebook, bg=gui_styles.BG_MAIN, padx=10, pady=10)
         
-        self.notebook.add(self.tab_settings, text=" Settings & Credentials ")
-        self.notebook.add(self.tab_wallets, text=" Wallet Manager ")
-        self.notebook.add(self.tab_logs, text=" Live Console & Logs ")
-        self.notebook.add(self.tab_backup, text=" Backup & License ")
+        self.notebook.add(self.tab_settings, text=" " + self.tr("settings_credentials") + " ")
+        self.notebook.add(self.tab_wallets, text=" " + self.tr("wallet_manager") + " ")
+        self.notebook.add(self.tab_logs, text=" " + self.tr("live_console") + " ")
+        self.notebook.add(self.tab_ui_settings, text=" " + self.tr("app_settings") + " ")
+        self.notebook.add(self.tab_backup, text=" " + self.tr("backup_license") + " ")
 
         # --- TAB 1: Settings & Credentials ---
         conn_card = ttk.Frame(self.tab_settings, style="Card.TFrame")
         conn_card.pack(fill=tk.X, pady=(0, 10))
-        conn_inner = tk.Frame(conn_card, bg=BG_CARD, padx=12, pady=10)
+        conn_inner = tk.Frame(conn_card, bg=gui_styles.BG_CARD, padx=12, pady=10)
         conn_inner.pack(fill=tk.X)
         
-        ttk.Label(conn_inner, text="Connection Credentials", style="CardLabel.TLabel").grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=(0, 10))
+        self.lbl_credentials_title = ttk.Label(conn_inner, text=self.tr("connection_credentials"), style="CardLabel.TLabel")
+        self.lbl_credentials_title.grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=(0, 10))
         
         # Telegram Token
-        ttk.Label(conn_inner, text="Telegram Token:", background=BG_CARD, foreground=TEXT_COLOR).grid(row=1, column=0, sticky=tk.W)
+        self.lbl_tg_token = ttk.Label(conn_inner, text=self.tr("telegram_token"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
+        self.lbl_tg_token.grid(row=1, column=0, sticky=tk.W)
         self.token_var = tk.StringVar(value=self.token)
-        self.token_entry = tk.Entry(conn_inner, textvariable=self.token_var, bg=BG_MAIN, fg=TEXT_COLOR, insertbackground=TEXT_COLOR, show="*", bd=1, relief=tk.SOLID)
+        self.token_entry = tk.Entry(conn_inner, textvariable=self.token_var, bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, insertbackground=gui_styles.TEXT_COLOR, show="*", bd=1, relief=tk.SOLID)
         self.token_entry.grid(row=1, column=1, sticky=tk.EW, padx=10, pady=5)
         
-        self.show_token_btn = ttk.Button(conn_inner, text="Show", width=6, style="Gray.TButton", command=self.toggle_token_visibility)
+        self.show_token_btn = ttk.Button(conn_inner, text=self.tr("show"), width=6, style="Gray.TButton", command=self.toggle_token_visibility)
         self.show_token_btn.grid(row=1, column=2, sticky=tk.W)
         
         # Chat ID
-        ttk.Label(conn_inner, text="Telegram Chat ID:", background=BG_CARD, foreground=TEXT_COLOR).grid(row=2, column=0, sticky=tk.W)
+        self.lbl_chat_id = ttk.Label(conn_inner, text=self.tr("telegram_chat_id"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
+        self.lbl_chat_id.grid(row=2, column=0, sticky=tk.W)
         self.chat_id_var = tk.StringVar(value=self.chat_id)
-        self.chat_id_entry = tk.Entry(conn_inner, textvariable=self.chat_id_var, bg=BG_MAIN, fg=TEXT_COLOR, insertbackground=TEXT_COLOR, show="*", bd=1, relief=tk.SOLID)
+        self.chat_id_entry = tk.Entry(conn_inner, textvariable=self.chat_id_var, bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, insertbackground=gui_styles.TEXT_COLOR, show="*", bd=1, relief=tk.SOLID)
         self.chat_id_entry.grid(row=2, column=1, sticky=tk.EW, padx=10, pady=5)
         
-        self.show_chat_id_btn = ttk.Button(conn_inner, text="Show", width=6, style="Gray.TButton", command=self.toggle_chat_id_visibility)
+        self.show_chat_id_btn = ttk.Button(conn_inner, text=self.tr("show"), width=6, style="Gray.TButton", command=self.toggle_chat_id_visibility)
         self.show_chat_id_btn.grid(row=2, column=2, sticky=tk.W)
         
         # Chat ID Hint
-        self.chat_id_hint = ttk.Label(conn_inner, text="Hint: Group Chat IDs usually begin with a minus sign (e.g. -100123456789)", background=BG_CARD, foreground=TEXT_MUTED, font=("Helvetica", 8))
+        self.chat_id_hint = ttk.Label(conn_inner, text=self.tr("hint_chat_id"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_MUTED, font=("Helvetica", 8))
         self.chat_id_hint.grid(row=3, column=1, columnspan=2, sticky=tk.W, padx=10, pady=(0, 5))
         
         # Solana RPC URL
-        ttk.Label(conn_inner, text="Solana RPC URL:", background=BG_CARD, foreground=TEXT_COLOR).grid(row=4, column=0, sticky=tk.W)
+        self.lbl_solana_rpc = ttk.Label(conn_inner, text=self.tr("solana_rpc_url"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
+        self.lbl_solana_rpc.grid(row=4, column=0, sticky=tk.W)
         self.rpc_url_var = tk.StringVar(value=self.rpc_url)
-        self.rpc_url_entry = tk.Entry(conn_inner, textvariable=self.rpc_url_var, bg=BG_MAIN, fg=TEXT_COLOR, insertbackground=TEXT_COLOR, bd=1, relief=tk.SOLID)
+        self.rpc_url_entry = tk.Entry(conn_inner, textvariable=self.rpc_url_var, bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, insertbackground=gui_styles.TEXT_COLOR, bd=1, relief=tk.SOLID)
         self.rpc_url_entry.grid(row=4, column=1, columnspan=2, sticky=tk.EW, padx=10, pady=5)
         
         # Buttons Frame on Row 5
-        btn_conn_frame = tk.Frame(conn_inner, bg=BG_CARD)
+        btn_conn_frame = tk.Frame(conn_inner, bg=gui_styles.BG_CARD)
         btn_conn_frame.grid(row=5, column=1, columnspan=2, sticky=tk.E, pady=(5, 0))
         
-        self.test_conn_btn = ttk.Button(btn_conn_frame, text="Test Connections", style="Gray.TButton", command=self.test_connections)
+        self.test_conn_btn = ttk.Button(btn_conn_frame, text=self.tr("test_connections"), style="Gray.TButton", command=self.test_connections)
         self.test_conn_btn.pack(side=tk.LEFT, padx=(0, 10))
         
-        save_conn_btn = ttk.Button(btn_conn_frame, text="Save Connection", style="Blue.TButton", command=self.save_connections)
-        save_conn_btn.pack(side=tk.LEFT)
+        self.save_conn_btn = ttk.Button(btn_conn_frame, text=self.tr("save_connection"), style="Blue.TButton", command=self.save_connections)
+        self.save_conn_btn.pack(side=tk.LEFT)
         
         conn_inner.columnconfigure(1, weight=1)
  
         # Preferences Card
         pref_card = ttk.Frame(self.tab_settings, style="Card.TFrame")
         pref_card.pack(fill=tk.X, pady=(10, 0))
-        pref_inner = tk.Frame(pref_card, bg=BG_CARD, padx=12, pady=10)
+        pref_inner = tk.Frame(pref_card, bg=gui_styles.BG_CARD, padx=12, pady=10)
         pref_inner.pack(fill=tk.X)
         
-        ttk.Label(pref_inner, text="Bot Preferences", style="CardLabel.TLabel").grid(row=0, column=0, columnspan=5, sticky=tk.W, pady=(0, 10))
+        self.lbl_pref_title = ttk.Label(pref_inner, text=self.tr("bot_preferences"), style="CardLabel.TLabel")
+        self.lbl_pref_title.grid(row=0, column=0, columnspan=5, sticky=tk.W, pady=(0, 10))
         
         # Display Currency
-        ttk.Label(pref_inner, text="Default Currency:", background=BG_CARD, foreground=TEXT_COLOR).grid(row=1, column=0, sticky=tk.W)
+        self.lbl_default_currency = ttk.Label(pref_inner, text=self.tr("default_currency"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
+        self.lbl_default_currency.grid(row=1, column=0, sticky=tk.W)
         self.currency_var = tk.StringVar(value=self.get_chat_pref("currency", "USD"))
         currencies = ["USD", "NIS", "CAD", "EUR", "GBP", "AUD"]
         self.currency_menu = ttk.Combobox(pref_inner, textvariable=self.currency_var, values=currencies, width=10, state="readonly")
         self.currency_menu.grid(row=1, column=1, sticky=tk.EW, padx=10, pady=5)
         
         # Interval
-        ttk.Label(pref_inner, text="Summary Interval:", background=BG_CARD, foreground=TEXT_COLOR).grid(row=1, column=2, sticky=tk.W)
+        self.lbl_summary_interval = ttk.Label(pref_inner, text=self.tr("summary_interval"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
+        self.lbl_summary_interval.grid(row=1, column=2, sticky=tk.W)
         self.interval_var = tk.StringVar(value=str(self.get_chat_pref("interval", 1)))
         intervals = ["1", "5", "15", "30", "60", "120", "240", "480"]
         self.interval_menu = ttk.Combobox(pref_inner, textvariable=self.interval_var, values=intervals, width=10, state="readonly")
         self.interval_menu.grid(row=1, column=3, sticky=tk.EW, padx=10, pady=5)
         
         # Save Preferences Button
-        save_pref_btn = ttk.Button(pref_inner, text="Save Preferences", style="Blue.TButton", command=self.save_preferences)
-        save_pref_btn.grid(row=1, column=4, rowspan=2, padx=(20, 0), sticky=tk.NS)
+        self.save_pref_btn = ttk.Button(pref_inner, text=self.tr("save_preferences"), style="Blue.TButton", command=self.save_preferences)
+        self.save_pref_btn.grid(row=1, column=4, rowspan=2, padx=(20, 0), sticky=tk.NS)
         
         # Status Interval
-        ttk.Label(pref_inner, text="Status Interval:", background=BG_CARD, foreground=TEXT_COLOR).grid(row=2, column=0, sticky=tk.W)
+        self.lbl_status_interval = ttk.Label(pref_inner, text=self.tr("status_interval"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
+        self.lbl_status_interval.grid(row=2, column=0, sticky=tk.W)
         self.status_interval_var = tk.StringVar(value=str(self.get_chat_pref("status_interval", 5)))
         status_intervals = ["1", "5", "10", "15", "30", "60"]
         self.status_interval_menu = ttk.Combobox(pref_inner, textvariable=self.status_interval_var, values=status_intervals, width=10, state="readonly")
         self.status_interval_menu.grid(row=2, column=1, sticky=tk.EW, padx=10, pady=5)
         
         # Whale Threshold
-        ttk.Label(pref_inner, text="Whale Threshold (%):", background=BG_CARD, foreground=TEXT_COLOR).grid(row=2, column=2, sticky=tk.W)
+        self.lbl_whale_threshold = ttk.Label(pref_inner, text=self.tr("whale_threshold"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
+        self.lbl_whale_threshold.grid(row=2, column=2, sticky=tk.W)
         self.whale_threshold_var = tk.StringVar(value=str(self.get_chat_pref("whale_threshold", 1.0)))
-        self.whale_threshold_entry = tk.Entry(pref_inner, textvariable=self.whale_threshold_var, bg=BG_MAIN, fg=TEXT_COLOR, insertbackground=TEXT_COLOR, bd=1, relief=tk.SOLID, width=12)
+        self.whale_threshold_entry = tk.Entry(pref_inner, textvariable=self.whale_threshold_var, bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, insertbackground=gui_styles.TEXT_COLOR, bd=1, relief=tk.SOLID, width=12)
         self.whale_threshold_entry.grid(row=2, column=3, sticky=tk.EW, padx=10, pady=5)
         
         # Show Coin Link Checkbox
         self.show_coin_link_var = tk.BooleanVar(value=self.get_chat_pref("show_coin_link", True))
         self.show_coin_link_check = tk.Checkbutton(
             pref_inner,
-            text="Show Coin Link (Dexscreener)",
+            text=self.tr("show_coin_link"),
             variable=self.show_coin_link_var,
-            bg=BG_CARD,
-            fg=TEXT_COLOR,
-            selectcolor=BG_MAIN,
-            activebackground=BG_CARD,
-            activeforeground=TEXT_COLOR,
+            bg=gui_styles.BG_CARD,
+            fg=gui_styles.TEXT_COLOR,
+            selectcolor=gui_styles.BG_MAIN,
+            activebackground=gui_styles.BG_CARD,
+            activeforeground=gui_styles.TEXT_COLOR,
             font=("Helvetica", 10),
             bd=0,
             highlightthickness=0
@@ -296,13 +569,13 @@ class ConfiguratorApp:
         self.show_market_cap_var = tk.BooleanVar(value=self.get_chat_pref("show_market_cap", True))
         self.show_market_cap_check = tk.Checkbutton(
             pref_inner,
-            text="Show Market Cap",
+            text=self.tr("show_market_cap"),
             variable=self.show_market_cap_var,
-            bg=BG_CARD,
-            fg=TEXT_COLOR,
-            selectcolor=BG_MAIN,
-            activebackground=BG_CARD,
-            activeforeground=TEXT_COLOR,
+            bg=gui_styles.BG_CARD,
+            fg=gui_styles.TEXT_COLOR,
+            selectcolor=gui_styles.BG_MAIN,
+            activebackground=gui_styles.BG_CARD,
+            activeforeground=gui_styles.TEXT_COLOR,
             font=("Helvetica", 10),
             bd=0,
             highlightthickness=0
@@ -313,13 +586,13 @@ class ConfiguratorApp:
         self.auto_start_var = tk.BooleanVar(value=(self.auto_start == "true"))
         self.auto_start_check = tk.Checkbutton(
             pref_inner, 
-            text="Auto-start Tracker Bot on launch (Skips UI clicking & Telegram /start)", 
+            text=self.tr("auto_start"), 
             variable=self.auto_start_var, 
-            bg=BG_CARD, 
-            fg=TEXT_COLOR, 
-            selectcolor=BG_MAIN, 
-            activebackground=BG_CARD, 
-            activeforeground=TEXT_COLOR,
+            bg=gui_styles.BG_CARD, 
+            fg=gui_styles.TEXT_COLOR, 
+            selectcolor=gui_styles.BG_MAIN, 
+            activebackground=gui_styles.BG_CARD, 
+            activeforeground=gui_styles.TEXT_COLOR,
             font=("Helvetica", 10),
             bd=0,
             highlightthickness=0
@@ -332,43 +605,64 @@ class ConfiguratorApp:
         # --- TAB 2: Wallet Manager ---
         wallet_card = ttk.Frame(self.tab_wallets, style="Card.TFrame")
         wallet_card.pack(fill=tk.BOTH, expand=True)
-        wallet_inner = tk.Frame(wallet_card, bg=BG_CARD, padx=12, pady=10)
+        wallet_inner = tk.Frame(wallet_card, bg=gui_styles.BG_CARD, padx=12, pady=10)
         wallet_inner.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(wallet_inner, text="Wallet Address Manager (Requires Chat ID to be saved)", style="CardLabel.TLabel").grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 10))
+        self.lbl_wallet_manager = ttk.Label(wallet_inner, text=self.tr("wallet_address_manager"), style="CardLabel.TLabel")
+        self.lbl_wallet_manager.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 10))
         
         # Left Panel - User Wallets (u)
-        user_frame = tk.Frame(wallet_inner, bg=BG_CARD)
+        user_frame = tk.Frame(wallet_inner, bg=gui_styles.BG_CARD)
         user_frame.grid(row=1, column=0, sticky=tk.NSEW, padx=(0, 10))
-        ttk.Label(user_frame, text="User Wallets (Tracks All Tokens)", background=BG_CARD, foreground=TEXT_MUTED).pack(anchor=tk.W, pady=(0, 3))
+        self.lbl_user_wallets = ttk.Label(user_frame, text=self.tr("user_wallets"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_MUTED)
+        self.lbl_user_wallets.pack(anchor=tk.W, pady=(0, 3))
         
-        self.user_listbox = tk.Listbox(user_frame, bg=BG_MAIN, fg=TEXT_COLOR, selectbackground=ACCENT_BLUE, bd=1, relief=tk.SOLID, selectforeground="#ffffff", highlightthickness=0, height=12)
-        self.user_listbox.pack(fill=tk.BOTH, expand=True)
+        user_list_frame = tk.Frame(user_frame, bg=gui_styles.BG_CARD)
+        user_list_frame.pack(fill=tk.BOTH, expand=True)
+        user_scroll = ttk.Scrollbar(user_list_frame)
+        user_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.user_listbox = tk.Listbox(user_list_frame, bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, selectbackground=gui_styles.ACCENT_BLUE, bd=1, relief=tk.SOLID, selectforeground="#ffffff", highlightthickness=0, height=12, yscrollcommand=user_scroll.set)
+        self.user_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        user_scroll.config(command=self.user_listbox.yview)
         self.user_listbox.bind("<Double-1>", lambda e: self.copy_selected_address(self.user_listbox, self.user_wallets_map))
         
-        btn_user_frame = tk.Frame(user_frame, bg=BG_CARD, pady=5)
+        btn_user_frame = tk.Frame(user_frame, bg=gui_styles.BG_CARD, pady=5)
         btn_user_frame.pack(fill=tk.X)
-        ttk.Button(btn_user_frame, text="Add Wallet", style="Green.TButton", command=self.add_user_wallet).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(btn_user_frame, text="Copy", style="Gray.TButton", command=lambda: self.copy_selected_address(self.user_listbox, self.user_wallets_map)).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(btn_user_frame, text="Remove", style="Red.TButton", command=self.remove_user_wallet).pack(side=tk.LEFT)
+        self.btn_add_user_wallet = ttk.Button(btn_user_frame, text=self.tr("add_wallet"), style="Green.TButton", command=self.add_user_wallet)
+        self.btn_add_user_wallet.pack(side=tk.LEFT, padx=(0, 5))
+        self.btn_copy_user_wallet = ttk.Button(btn_user_frame, text=self.tr("copy"), style="Gray.TButton", command=lambda: self.copy_selected_address(self.user_listbox, self.user_wallets_map))
+        self.btn_copy_user_wallet.pack(side=tk.LEFT, padx=(0, 5))
+        self.btn_remove_user_wallet = ttk.Button(btn_user_frame, text=self.tr("remove"), style="Red.TButton", command=self.remove_user_wallet)
+        self.btn_remove_user_wallet.pack(side=tk.LEFT)
         
         # Right Panel - Specific Tokens (w)
-        token_frame = tk.Frame(wallet_inner, bg=BG_CARD)
+        token_frame = tk.Frame(wallet_inner, bg=gui_styles.BG_CARD)
         token_frame.grid(row=1, column=1, sticky=tk.NSEW, padx=(10, 0))
-        ttk.Label(token_frame, text="Token Accounts (Tracks Single Token)", background=BG_CARD, foreground=TEXT_MUTED).pack(anchor=tk.W, pady=(0, 3))
+        self.lbl_token_accounts = ttk.Label(token_frame, text=self.tr("token_accounts"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_MUTED)
+        self.lbl_token_accounts.pack(anchor=tk.W, pady=(0, 3))
         
-        self.token_listbox = tk.Listbox(token_frame, bg=BG_MAIN, fg=TEXT_COLOR, selectbackground=ACCENT_BLUE, bd=1, relief=tk.SOLID, selectforeground="#ffffff", highlightthickness=0, height=12)
-        self.token_listbox.pack(fill=tk.BOTH, expand=True)
+        token_list_frame = tk.Frame(token_frame, bg=gui_styles.BG_CARD)
+        token_list_frame.pack(fill=tk.BOTH, expand=True)
+        token_scroll = ttk.Scrollbar(token_list_frame)
+        token_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.token_listbox = tk.Listbox(token_list_frame, bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, selectbackground=gui_styles.ACCENT_BLUE, bd=1, relief=tk.SOLID, selectforeground="#ffffff", highlightthickness=0, height=12, yscrollcommand=token_scroll.set)
+        self.token_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        token_scroll.config(command=self.token_listbox.yview)
         self.token_listbox.bind("<Double-1>", lambda e: self.copy_selected_address(self.token_listbox, self.token_wallets_map))
         
-        btn_token_frame = tk.Frame(token_frame, bg=BG_CARD, pady=5)
+        btn_token_frame = tk.Frame(token_frame, bg=gui_styles.BG_CARD, pady=5)
         btn_token_frame.pack(fill=tk.X)
-        ttk.Button(btn_token_frame, text="Add Token Account", style="Green.TButton", command=self.add_token_wallet).pack(side=tk.LEFT)
-        ttk.Button(btn_token_frame, text="Copy", style="Gray.TButton", command=lambda: self.copy_selected_address(self.token_listbox, self.token_wallets_map)).pack(side=tk.LEFT, padx=(5, 5))
-        ttk.Button(btn_token_frame, text="Remove", style="Red.TButton", command=self.remove_token_wallet).pack(side=tk.LEFT)
+        self.btn_add_token_wallet = ttk.Button(btn_token_frame, text=self.tr("add_token_account"), style="Green.TButton", command=self.add_token_wallet)
+        self.btn_add_token_wallet.pack(side=tk.LEFT)
+        self.btn_copy_token_wallet = ttk.Button(btn_token_frame, text=self.tr("copy"), style="Gray.TButton", command=lambda: self.copy_selected_address(self.token_listbox, self.token_wallets_map))
+        self.btn_copy_token_wallet.pack(side=tk.LEFT, padx=(5, 5))
+        self.btn_remove_token_wallet = ttk.Button(btn_token_frame, text=self.tr("remove"), style="Red.TButton", command=self.remove_token_wallet)
+        self.btn_remove_token_wallet.pack(side=tk.LEFT)
         
         # Status feedback label in Tab 2
-        self.wallet_status_lbl = ttk.Label(wallet_inner, text="", font=("Helvetica", 9), background=BG_CARD, foreground=ACCENT_BLUE)
+        self.wallet_status_lbl = ttk.Label(wallet_inner, text="", font=("Helvetica", 9), background=gui_styles.BG_CARD, foreground=gui_styles.ACCENT_BLUE)
         self.wallet_status_lbl.grid(row=2, column=0, columnspan=2, pady=(5, 0))
         
         wallet_inner.rowconfigure(1, weight=1)
@@ -378,62 +672,129 @@ class ConfiguratorApp:
         self.update_wallet_lists()
 
         # --- TAB 3: Live Console & Logs ---
-        console_frame = tk.Frame(self.tab_logs, bg=BG_MAIN)
+        console_frame = tk.Frame(self.tab_logs, bg=gui_styles.BG_MAIN)
         console_frame.pack(fill=tk.X, side=tk.TOP, pady=(0, 10))
         
-        self.start_btn = ttk.Button(console_frame, text="Start Tracker Bot", style="Green.TButton", command=self.start_bot)
+        self.start_btn = ttk.Button(console_frame, text=self.tr("start_bot"), style="Green.TButton", command=self.start_bot)
         self.start_btn.pack(side=tk.LEFT)
         
-        self.stop_btn = ttk.Button(console_frame, text="Stop Tracker Bot", style="Red.TButton", command=self.stop_bot, state=tk.DISABLED)
+        self.stop_btn = ttk.Button(console_frame, text=self.tr("stop_bot"), style="Red.TButton", command=self.stop_bot, state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT, padx=10)
         
-        btn_clear_console = ttk.Button(console_frame, text="Clear Console", style="Gray.TButton", command=self.clear_log_display)
-        btn_clear_console.pack(side=tk.LEFT)
+        self.btn_clear_console = ttk.Button(console_frame, text=self.tr("clear_console"), style="Gray.TButton", command=self.clear_log_display)
+        self.btn_clear_console.pack(side=tk.LEFT)
         
-        ttk.Button(console_frame, text="Exit", style="Gray.TButton", command=self.clean_exit).pack(side=tk.RIGHT)
+        # Filter Dropdown
+        self.log_filter_var = tk.StringVar(value="All")
+        self.log_filter_menu = ttk.Combobox(console_frame, textvariable=self.log_filter_var, values=["All", "Info", "Warning", "Error"], width=10, state="readonly")
+        self.log_filter_menu.pack(side=tk.LEFT, padx=10)
+        self.log_filter_menu.bind("<<ComboboxSelected>>", lambda e: self.refresh_logs())
         
-        self.status_lbl = ttk.Label(console_frame, text="● Status: Stopped", font=("Helvetica", 10, "bold"), foreground=ACCENT_RED)
+        # Auto-scroll Checkbox
+        self.log_autoscroll_var = tk.BooleanVar(value=True)
+        self.log_autoscroll_check = tk.Checkbutton(
+            console_frame,
+            text=self.tr("auto_scroll"),
+            variable=self.log_autoscroll_var,
+            bg=gui_styles.BG_MAIN,
+            fg=gui_styles.TEXT_COLOR,
+            selectcolor=gui_styles.BG_CARD,
+            activebackground=gui_styles.BG_MAIN,
+            activeforeground=gui_styles.TEXT_COLOR,
+            font=("Helvetica", 10),
+            bd=0,
+            highlightthickness=0
+        )
+        self.log_autoscroll_check.pack(side=tk.LEFT)
+        
+        self.btn_exit = ttk.Button(console_frame, text=self.tr("exit"), style="Gray.TButton", command=self.clean_exit)
+        self.btn_exit.pack(side=tk.RIGHT)
+        
+        self.status_lbl = ttk.Label(console_frame, text=self.tr("status_stopped"), font=("Helvetica", 10, "bold"), foreground=gui_styles.ACCENT_RED)
         self.status_lbl.pack(side=tk.RIGHT, padx=20)
         
-        self.log_text = tk.Text(self.tab_logs, bg="#0d0d0f", fg="#a9a9b3", insertbackground=TEXT_COLOR, state=tk.DISABLED, font=("Consolas", 9), bd=1, relief=tk.SOLID)
-        self.log_text.pack(fill=tk.BOTH, expand=True)
+        log_frame = tk.Frame(self.tab_logs, bg=gui_styles.BG_MAIN)
+        log_frame.pack(fill=tk.BOTH, expand=True)
+        log_scroll = ttk.Scrollbar(log_frame)
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.log_text = tk.Text(log_frame, bg="#0d0d0f" if self.settings.get("theme", "Dark Mode") == "Dark Mode" else "#f4f4f5", fg="#a9a9b3" if self.settings.get("theme", "Dark Mode") == "Dark Mode" else "#27272a", insertbackground=gui_styles.TEXT_COLOR, state=tk.DISABLED, font=("Consolas", gui_styles.FONT_SIZE - 1 if gui_styles.FONT_SIZE > 8 else 8), bd=1, relief=tk.SOLID, yscrollcommand=log_scroll.set)
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        log_scroll.config(command=self.log_text.yview)
         
         # Log coloring tags
         self.log_text.tag_config("info", foreground="#60a5fa")     # Soft blue
         self.log_text.tag_config("warning", foreground="#fbbf24")  # Soft yellow
         self.log_text.tag_config("error", foreground="#f87171")    # Soft red
         
-        self.logs_visible = True
+        self.logs_visible = False
 
-        # --- TAB 4: Backup & License ---
+        # --- TAB 4: App Settings ---
+        ui_card = ttk.Frame(self.tab_ui_settings, style="Card.TFrame")
+        ui_card.pack(fill=tk.BOTH, expand=True)
+        ui_inner = tk.Frame(ui_card, bg=gui_styles.BG_CARD, padx=15, pady=15)
+        ui_inner.pack(fill=tk.BOTH, expand=True)
+        
+        self.lbl_ui_title = ttk.Label(ui_inner, text=self.tr("ui_settings_title"), style="CardLabel.TLabel")
+        self.lbl_ui_title.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 15))
+        
+        # Language Selector
+        self.lbl_lang = ttk.Label(ui_inner, text=self.tr("language"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
+        self.lbl_lang.grid(row=1, column=0, sticky=tk.W, pady=10)
+        self.lang_var = tk.StringVar(value=self.settings.get("language", "English"))
+        self.lang_menu = ttk.Combobox(ui_inner, textvariable=self.lang_var, values=["English", "Russian", "Arabic"], width=15, state="readonly")
+        self.lang_menu.grid(row=1, column=1, sticky=tk.W, padx=15, pady=10)
+        
+        # Font Size Selector
+        self.lbl_font_size = ttk.Label(ui_inner, text=self.tr("font_size"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
+        self.lbl_font_size.grid(row=2, column=0, sticky=tk.W, pady=10)
+        self.font_size_var = tk.StringVar(value=self.settings.get("font_size", "Medium"))
+        self.font_size_menu = ttk.Combobox(ui_inner, textvariable=self.font_size_var, values=["Small", "Medium", "Large"], width=15, state="readonly")
+        self.font_size_menu.grid(row=2, column=1, sticky=tk.W, padx=15, pady=10)
+        
+        # Theme Selector
+        self.lbl_theme = ttk.Label(ui_inner, text=self.tr("theme"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
+        self.lbl_theme.grid(row=3, column=0, sticky=tk.W, pady=10)
+        self.theme_var = tk.StringVar(value=self.settings.get("theme", "Dark Mode"))
+        self.theme_menu = ttk.Combobox(ui_inner, textvariable=self.theme_var, values=["Dark Mode", "Light Mode"], width=15, state="readonly")
+        self.theme_menu.grid(row=3, column=1, sticky=tk.W, padx=15, pady=10)
+        
+        # Save Settings Button
+        self.btn_save_settings = ttk.Button(ui_inner, text=self.tr("save_settings"), style="Blue.TButton", command=self.save_ui_settings)
+        self.btn_save_settings.grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=(20, 0))
+
+        # --- TAB 5: Backup & License ---
         backup_card = ttk.Frame(self.tab_backup, style="Card.TFrame")
         backup_card.pack(fill=tk.X, pady=(0, 10))
-        backup_inner = tk.Frame(backup_card, bg=BG_CARD, padx=12, pady=12)
+        backup_inner = tk.Frame(backup_card, bg=gui_styles.BG_CARD, padx=12, pady=12)
         backup_inner.pack(fill=tk.X)
         
-        ttk.Label(backup_inner, text="Backup & Restore", style="CardLabel.TLabel").pack(anchor=tk.W, pady=(0, 5))
-        ttk.Label(backup_inner, text="Export or import your list of tracked wallets to backup your settings or sync configuration across files.", background=BG_CARD, foreground=TEXT_MUTED, font=("Helvetica", 9)).pack(anchor=tk.W, pady=(0, 15))
+        self.lbl_backup_restore = ttk.Label(backup_inner, text=self.tr("backup_restore"), style="CardLabel.TLabel")
+        self.lbl_backup_restore.pack(anchor=tk.W, pady=(0, 5))
+        self.lbl_backup_desc = ttk.Label(backup_inner, text=self.tr("backup_desc"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_MUTED, font=("Helvetica", 9))
+        self.lbl_backup_desc.pack(anchor=tk.W, pady=(0, 15))
         
-        btn_back_frame = tk.Frame(backup_inner, bg=BG_CARD)
+        btn_back_frame = tk.Frame(backup_inner, bg=gui_styles.BG_CARD)
         btn_back_frame.pack(fill=tk.X, anchor=tk.W)
         
-        btn_export = ttk.Button(btn_back_frame, text="Export Tracked List", style="Blue.TButton", command=self.export_config)
-        btn_export.pack(side=tk.LEFT, padx=(0, 10))
+        self.btn_export = ttk.Button(btn_back_frame, text=self.tr("export_list"), style="Blue.TButton", command=self.export_config)
+        self.btn_export.pack(side=tk.LEFT, padx=(0, 10))
         
-        btn_import = ttk.Button(btn_back_frame, text="Import Tracked List", style="Gray.TButton", command=self.import_config)
-        btn_import.pack(side=tk.LEFT)
+        self.btn_import = ttk.Button(btn_back_frame, text=self.tr("import_list"), style="Gray.TButton", command=self.import_config)
+        self.btn_import.pack(side=tk.LEFT)
         
         license_card = ttk.Frame(self.tab_backup, style="Card.TFrame")
         license_card.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-        license_inner = tk.Frame(license_card, bg=BG_CARD, padx=12, pady=12)
+        license_inner = tk.Frame(license_card, bg=gui_styles.BG_CARD, padx=12, pady=12)
         license_inner.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(license_inner, text="About & Open Source License", style="CardLabel.TLabel").pack(anchor=tk.W, pady=(0, 5))
+        self.lbl_about_license = ttk.Label(license_inner, text=self.tr("about_license"), style="CardLabel.TLabel")
+        self.lbl_about_license.pack(anchor=tk.W, pady=(0, 5))
         
         about_text = (
             "Solana Telegram Tracker Configurator v1.1.0\n"
             "An open-source transaction monitoring system for Solana wallets.\n"
-            "Created by devops-user (c) 2026.\n\n"
+            "Created by Ofir (c) 2026.\n\n"
             "Licensed under the MIT License:\n\n"
             "Permission is hereby granted, free of charge, to any person obtaining a copy\n"
             "of this software and associated documentation files (the \"Software\"), to deal\n"
@@ -445,11 +806,147 @@ class ConfiguratorApp:
             "copies or substantial portions of the Software."
         )
         
-        license_textbox = tk.Text(license_inner, bg="#0d0d0f", fg=TEXT_MUTED, font=("Consolas", 8), wrap=tk.WORD, bd=1, relief=tk.SOLID)
+        license_textbox = tk.Text(license_inner, bg="#0d0d0f" if self.settings.get("theme", "Dark Mode") == "Dark Mode" else "#ffffff", fg=gui_styles.TEXT_MUTED, font=("Consolas", 8), wrap=tk.WORD, bd=1, relief=tk.SOLID)
         license_textbox.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
         license_textbox.insert(tk.END, about_text)
         license_textbox.config(state=tk.DISABLED)
 
+    def on_tab_changed(self, event):
+        selected_tab = self.notebook.select()
+        if selected_tab == str(self.tab_logs):
+            if not self.logs_visible:
+                self.logs_visible = True
+                self.refresh_logs()
+        else:
+            self.logs_visible = False
+
+    def save_ui_settings(self):
+        self.settings["language"] = self.lang_var.get()
+        self.settings["font_size"] = self.font_size_var.get()
+        self.settings["theme"] = self.theme_var.get()
+        
+        self.save_state()
+        
+        font_size_pt = FONT_SIZES.get(self.settings["font_size"], 10)
+        setup_styles(font_size=font_size_pt, theme=self.settings["theme"], root=self.root)
+        
+        if sys.platform == "win32":
+            import ctypes
+            try:
+                self.root.update_idletasks()
+                hwnd = self.root.winfo_id()
+                is_dark = (self.settings.get("theme") == "Dark Mode")
+                rendering = ctypes.c_int(1 if is_dark else 0)
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(rendering), ctypes.sizeof(rendering))
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(rendering), ctypes.sizeof(rendering))
+            except Exception:
+                pass
+                
+        self.apply_theme_and_fonts()
+        messagebox.showinfo("Success", "Settings saved and applied successfully!")
+
+    def apply_theme_and_fonts(self):
+        self.root.configure(bg=gui_styles.BG_MAIN)
+        font_size_pt = FONT_SIZES.get(self.settings.get("font_size", "Medium"), 10)
+        normal_font = ("Helvetica", font_size_pt)
+        console_font = ("Consolas", font_size_pt - 1 if font_size_pt > 8 else 8)
+        
+        self.apply_translations()
+        
+        def update_widget(w):
+            widget_class = w.winfo_class()
+            if widget_class == "Frame":
+                curr_bg = w.cget("bg")
+                if curr_bg in ["#121214", "#f4f4f5"]:
+                    w.configure(bg=gui_styles.BG_MAIN)
+                elif curr_bg in ["#1a1a1e", "#ffffff"]:
+                    w.configure(bg=gui_styles.BG_CARD)
+                else:
+                    w.configure(bg=gui_styles.BG_MAIN)
+            elif widget_class == "Listbox":
+                w.configure(bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, selectbackground=gui_styles.ACCENT_BLUE, font=normal_font)
+            elif widget_class == "Entry":
+                w.configure(bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, insertbackground=gui_styles.TEXT_COLOR, font=normal_font)
+            elif widget_class == "Text":
+                if w == self.log_text:
+                    w.configure(bg="#0d0d0f" if self.settings.get("theme") == "Dark Mode" else "#f4f4f5", fg="#a9a9b3" if self.settings.get("theme") == "Dark Mode" else "#27272a", insertbackground=gui_styles.TEXT_COLOR, font=console_font)
+                else:
+                    w.configure(bg="#0d0d0f" if self.settings.get("theme") == "Dark Mode" else "#ffffff", fg=gui_styles.TEXT_MUTED, font=console_font)
+            elif widget_class == "Checkbutton":
+                w.configure(bg=gui_styles.BG_CARD, fg=gui_styles.TEXT_COLOR, selectcolor=gui_styles.BG_MAIN, activebackground=gui_styles.BG_CARD, activeforeground=gui_styles.TEXT_COLOR, font=normal_font)
+            elif widget_class == "Label":
+                curr_bg = w.cget("bg")
+                if curr_bg in ["#1a1a1e", "#ffffff"]:
+                    w.configure(bg=gui_styles.BG_CARD, fg=gui_styles.TEXT_COLOR, font=normal_font)
+                else:
+                    w.configure(bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, font=normal_font)
+            for child in w.winfo_children():
+                update_widget(child)
+        update_widget(self.root)
+
+    def apply_translations(self):
+        self.notebook.tab(self.tab_settings, text=" " + self.tr("settings_credentials") + " ")
+        self.notebook.tab(self.tab_wallets, text=" " + self.tr("wallet_manager") + " ")
+        self.notebook.tab(self.tab_logs, text=" " + self.tr("live_console") + " ")
+        self.notebook.tab(self.tab_ui_settings, text=" " + self.tr("app_settings") + " ")
+        self.notebook.tab(self.tab_backup, text=" " + self.tr("backup_license") + " ")
+        
+        self.title_lbl.config(text=self.tr("title"))
+        self.lbl_credentials_title.config(text=self.tr("connection_credentials"))
+        self.lbl_tg_token.config(text=self.tr("telegram_token"))
+        self.lbl_chat_id.config(text=self.tr("telegram_chat_id"))
+        self.lbl_solana_rpc.config(text=self.tr("solana_rpc_url"))
+        self.test_conn_btn.config(text=self.tr("test_connections"))
+        self.save_conn_btn.config(text=self.tr("save_connection"))
+        self.chat_id_hint.config(text=self.tr("hint_chat_id"))
+        
+        self.lbl_pref_title.config(text=self.tr("bot_preferences"))
+        self.lbl_default_currency.config(text=self.tr("default_currency"))
+        self.lbl_summary_interval.config(text=self.tr("summary_interval"))
+        self.save_pref_btn.config(text=self.tr("save_preferences"))
+        self.lbl_status_interval.config(text=self.tr("status_interval"))
+        self.lbl_whale_threshold.config(text=self.tr("whale_threshold"))
+        self.show_coin_link_check.config(text=self.tr("show_coin_link"))
+        self.show_market_cap_check.config(text=self.tr("show_market_cap"))
+        self.auto_start_check.config(text=self.tr("auto_start"))
+        
+        self.lbl_wallet_manager.config(text=self.tr("wallet_address_manager"))
+        self.lbl_user_wallets.config(text=self.tr("user_wallets"))
+        self.btn_add_user_wallet.config(text=self.tr("add_wallet"))
+        self.btn_copy_user_wallet.config(text=self.tr("copy"))
+        self.btn_remove_user_wallet.config(text=self.tr("remove"))
+        self.lbl_token_accounts.config(text=self.tr("token_accounts"))
+        self.btn_add_token_wallet.config(text=self.tr("add_token_account"))
+        self.btn_copy_token_wallet.config(text=self.tr("copy"))
+        self.btn_remove_token_wallet.config(text=self.tr("remove"))
+        
+        self.start_btn.config(text=self.tr("start_bot"))
+        self.stop_btn.config(text=self.tr("stop_bot"))
+        self.btn_clear_console.config(text=self.tr("clear_console"))
+        self.btn_exit.config(text=self.tr("exit"))
+        
+        self.update_status_label()
+        
+        self.lbl_backup_restore.config(text=self.tr("backup_restore"))
+        self.btn_export.config(text=self.tr("export_list"))
+        self.btn_import.config(text=self.tr("import_list"))
+        self.lbl_about_license.config(text=self.tr("about_license"))
+        
+        self.lbl_ui_title.config(text=self.tr("ui_settings_title"))
+        self.lbl_lang.config(text=self.tr("language"))
+        self.lbl_font_size.config(text=self.tr("font_size"))
+        self.lbl_theme.config(text=self.tr("theme"))
+        self.btn_save_settings.config(text=self.tr("save_settings"))
+        
+        if self.token_entry.cget("show") == "*":
+            self.show_token_btn.config(text=self.tr("show"))
+        else:
+            self.show_token_btn.config(text=self.tr("hide"))
+            
+        if self.chat_id_entry.cget("show") == "*":
+            self.show_chat_id_btn.config(text=self.tr("show"))
+        else:
+            self.show_chat_id_btn.config(text=self.tr("hide"))
 
     # State Loaders
     def load_env_values(self):
@@ -482,35 +979,92 @@ class ConfiguratorApp:
 
     def load_state_values(self):
         if os.path.exists(STATE_PATH):
+            lock_path = STATE_PATH + ".lock"
+            import time
+            start_time = time.time()
+            while True:
+                try:
+                    os.mkdir(lock_path)
+                    break
+                except FileExistsError:
+                    if time.time() - start_time > 5.0:
+                        try:
+                            os.rmdir(lock_path)
+                        except Exception:
+                            pass
+                    time.sleep(0.1)
             try:
                 with open(STATE_PATH, "r") as f:
                     return json.load(f)
             except Exception:
                 pass
+            finally:
+                try:
+                    os.rmdir(lock_path)
+                except Exception:
+                    pass
         return {"chats": {}, "global_last_signatures": {}}
 
     def save_state(self):
         os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+        lock_path = STATE_PATH + ".lock"
+        import time
+        start_time = time.time()
+        while True:
+            try:
+                os.mkdir(lock_path)
+                break
+            except FileExistsError:
+                if time.time() - start_time > 5.0:
+                    try:
+                        os.rmdir(lock_path)
+                    except Exception:
+                        pass
+                time.sleep(0.1)
         try:
+            fresh_state = {"chats": {}, "global_last_signatures": {}}
+            if os.path.exists(STATE_PATH):
+                try:
+                    with open(STATE_PATH, "r") as f:
+                        fresh_state = json.load(f)
+                except Exception:
+                    pass
+            fresh_state["chats"] = self.state.get("chats", {})
+            fresh_state["settings"] = self.settings
+            self.state = fresh_state
+            
             with open(STATE_PATH, "w") as f:
-                json.dump(self.state, f, indent=2)
+                json.dump(self.state, f, indent=4)
         except Exception as e:
-            messagebox.showerror("Save Error", f"Failed to save tracked.json state: {e}")
+            messagebox.showerror(self.tr("save_error"), self.tr("failed_save_state").format(error=e))
+        finally:
+            try:
+                os.rmdir(lock_path)
+            except Exception:
+                pass
 
     def get_chat_pref(self, key, default):
         if not self.chat_id:
             return default
-        chat_data = self.state.get("chats", {}).get(str(self.chat_id), {})
+        chat_id_str = str(self.chat_id)
+        chat_data = self.state.get("chats", {}).get(chat_id_str, {})
         return chat_data.get(key, default)
 
-    # Actions
     def toggle_token_visibility(self):
         if self.token_entry.cget("show") == "*":
             self.token_entry.config(show="")
-            self.show_token_btn.config(text="Hide")
+            self.show_token_btn.config(text=self.tr("hide"))
         else:
             self.token_entry.config(show="*")
-            self.show_token_btn.config(text="Show")
+            self.show_token_btn.config(text=self.tr("show"))
+
+    def toggle_chat_id_visibility(self):
+        if self.chat_id_entry.cget("show") == "*":
+            self.chat_id_entry.config(show="")
+            self.show_chat_id_btn.config(text=self.tr("hide"))
+        else:
+            self.chat_id_entry.config(show="*")
+            self.show_chat_id_btn.config(text=self.tr("show"))
 
     def test_connections(self):
         token = self.token_var.get().replace('\r', '').replace('\n', '').strip()
@@ -518,10 +1072,10 @@ class ConfiguratorApp:
         rpc_url = self.rpc_url_var.get().replace('\r', '').replace('\n', '').strip()
         
         if not token:
-            messagebox.showwarning("Test Error", "Telegram Bot Token is required to run connection tests.")
+            messagebox.showwarning(self.tr("test_error"), self.tr("token_required"))
             return
             
-        self.test_conn_btn.config(state=tk.DISABLED, text="Testing...")
+        self.test_conn_btn.config(state=tk.DISABLED, text=self.tr("testing"))
         
         def run_test():
             results = []
@@ -555,11 +1109,11 @@ class ConfiguratorApp:
                     rpc_errors.append(f"{u}: {str(e)}")
             
             if rpc_ok:
-                results.append(f"[✓] Solana RPC: Connected successfully ({latency_ms}ms).")
+                results.append(f"🟢 Solana RPC: Connected successfully ({latency_ms}ms).")
             else:
                 success = False
                 err_str = "; ".join(rpc_errors)
-                results.append(f"[✗] Solana RPC: Failed ({err_str})")
+                results.append(f"🔴 Solana RPC: Failed ({err_str})")
                 
             # 2. Test Telegram Bot Token
             tg_token_ok = False
@@ -569,12 +1123,11 @@ class ConfiguratorApp:
                     res_json = response.json()
                     if res_json.get("ok"):
                         tg_token_ok = True
-                        bot_name = res_json.get("result", {}).get("username", "Bot")
-                        results.append(f"[✓] Telegram Bot Token: Valid (@{bot_name}).")
+                        results.append("🟢 Telegram Bot Token: Valid.")
                     else:
-                        results.append("[✗] Telegram Bot Token: Invalid response from API.")
+                        results.append("🔴 Telegram Bot Token: Invalid response from API.")
             except Exception as e:
-                results.append(f"[✗] Telegram Bot Token: Failed ({str(e)})")
+                results.append(f"🔴 Telegram Bot Token: Failed ({str(e)})")
                 
             # 3. Test Telegram Chat ID
             if chat_id:
@@ -586,21 +1139,21 @@ class ConfiguratorApp:
                         if response.status_code == 200:
                             res_json = response.json()
                             if res_json.get("ok"):
-                                results.append("[✓] Telegram Chat ID: Valid (Test message delivered).")
+                                results.append("🟢 Telegram Chat ID: Valid (Test message delivered).")
                             else:
                                 success = False
-                                results.append(f"[✗] Telegram Chat ID: Failed to send message ({res_json.get('description')})")
+                                results.append(f"🔴 Telegram Chat ID: Failed to send message ({res_json.get('description')})")
                         else:
                             success = False
-                            results.append(f"[✗] Telegram Chat ID: HTTP {response.status_code} ({response.text})")
+                            results.append(f"🔴 Telegram Chat ID: HTTP {response.status_code} ({response.text})")
                     except Exception as e:
                         success = False
-                        results.append(f"[✗] Telegram Chat ID: Failed ({str(e)})")
+                        results.append(f"🔴 Telegram Chat ID: Failed ({str(e)})")
                 else:
                     success = False
-                    results.append("[✗] Telegram Chat ID: Cannot test (invalid bot token).")
+                    results.append("🔴 Telegram Chat ID: Cannot test (invalid bot token).")
             else:
-                results.append("[i] Telegram Chat ID: Empty (skipped test).")
+                results.append("ℹ️ Telegram Chat ID: Empty (skipped test).")
                 
             # Invoke callback on main thread
             self.root.after(0, lambda: self.show_test_results(success, results))
@@ -608,12 +1161,12 @@ class ConfiguratorApp:
         threading.Thread(target=run_test, daemon=True).start()
 
     def show_test_results(self, success, results):
-        self.test_conn_btn.config(state=tk.NORMAL, text="Test Connections")
+        self.test_conn_btn.config(state=tk.NORMAL, text=self.tr("test_connections"))
         message_str = "\n".join(results)
         if success:
-            messagebox.showinfo("Connection Test Success", message_str)
+            messagebox.showinfo(self.tr("conn_test_success"), message_str)
         else:
-            messagebox.showerror("Connection Test Failure", message_str)
+            messagebox.showerror(self.tr("conn_test_failure"), message_str)
 
     def save_connections(self):
         token = self.token_var.get().replace('\r', '').replace('\n', '').strip()
@@ -621,24 +1174,24 @@ class ConfiguratorApp:
         rpc_url = self.rpc_url_var.get().replace('\r', '').replace('\n', '').strip()
         
         if not token:
-            messagebox.showwarning("Validation Error", "Telegram Token cannot be empty.")
+            messagebox.showwarning(self.tr("validation_error"), self.tr("token_empty"))
             return
             
         # Validate Telegram Bot Token format
         if not re.match(r"^\d+:[A-Za-z0-9_-]{35,}$", token):
-            if not messagebox.askyesno("Validation Warning", "The Telegram Bot Token format looks unusual.\nFormat is typically digits:chars (e.g. 1234567:ABCabc...).\nAre you sure you want to save it?"):
+            if not messagebox.askyesno(self.tr("token_warning_title"), self.tr("token_warning_msg")):
                 return
                 
-        # Validate Telegram Chat ID format (must be an integer, negative for groups)
+        # Validate Telegram Chat ID format
         if chat_id and not re.match(r"^-?\d+$", chat_id):
-            messagebox.showerror("Validation Error", "Telegram Chat ID must be a numeric value.\nGroup Chat IDs typically start with a minus sign (e.g., -100123456789).")
+            messagebox.showerror(self.tr("validation_error"), self.tr("chat_id_numeric"))
             return
             
         # Validate Solana RPC URLs
         urls = [u.strip() for u in rpc_url.split(",")]
         for url in urls:
             if not (url.startswith("http://") or url.startswith("https://")):
-                messagebox.showerror("Validation Error", f"Invalid RPC URL: '{url}'.\nMust start with http:// or https://")
+                messagebox.showerror(self.tr("validation_error"), self.tr("rpc_invalid").format(url=url))
                 return
                 
         # Write to env
@@ -669,7 +1222,7 @@ class ConfiguratorApp:
                         "whale_threshold": 1.0,
                         "show_coin_link": True,
                         "show_market_cap": True,
-                        "last_summary_time": time.time() if "time" in sys.modules else 0.0,
+                        "last_summary_time": time.time(),
                         "last_status_time": 0.0,
                         "status_txs": [],
                         "tracked": {},
@@ -680,13 +1233,13 @@ class ConfiguratorApp:
                 self.save_state()
             
             self.update_wallet_lists()
-            messagebox.showinfo("Success", "Connection parameters saved successfully.")
+            messagebox.showinfo(self.tr("success"), self.tr("success_conn"))
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save environment variables: {e}")
+            messagebox.showerror(self.tr("error"), self.tr("failed_save_env").format(error=e))
 
     def save_preferences(self):
         if not self.chat_id:
-            messagebox.showwarning("Configuration Error", "Please save a Telegram Chat ID first.")
+            messagebox.showwarning(self.tr("config_error"), self.tr("chat_id_required"))
             return
             
         curr = self.currency_var.get()
@@ -696,7 +1249,7 @@ class ConfiguratorApp:
             if intv < 1:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror("Validation Error", "Summary Interval must be a positive integer.")
+            messagebox.showerror(self.tr("validation_error"), self.tr("summary_interval_pos"))
             return
             
         try:
@@ -704,7 +1257,7 @@ class ConfiguratorApp:
             if s_intv < 1:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror("Validation Error", "Status Interval must be a positive integer.")
+            messagebox.showerror(self.tr("validation_error"), self.tr("status_interval_pos"))
             return
             
         try:
@@ -712,7 +1265,7 @@ class ConfiguratorApp:
             if w_thresh <= 0.0:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror("Validation Error", "Whale Threshold must be a positive number.")
+            messagebox.showerror(self.tr("validation_error"), self.tr("whale_threshold_pos"))
             return
             
         show_link = self.show_coin_link_var.get()
@@ -729,7 +1282,7 @@ class ConfiguratorApp:
                 f.write(f"SOLANA_RPC_URL={self.rpc_url}\n")
                 f.write(f"AUTO_START_BOT={self.auto_start}\n")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to update environment variables: {e}")
+            messagebox.showerror(self.tr("error"), self.tr("failed_save_env").format(error=e))
             return
             
         chat_id_str = str(self.chat_id)
@@ -758,8 +1311,9 @@ class ConfiguratorApp:
         self.state["chats"][chat_id_str]["whale_threshold"] = w_thresh
         self.state["chats"][chat_id_str]["show_coin_link"] = show_link
         self.state["chats"][chat_id_str]["show_market_cap"] = show_mcap
+        
         self.save_state()
-        messagebox.showinfo("Success", "Preferences saved successfully.")
+        messagebox.showinfo(self.tr("success"), self.tr("success_pref"))
 
     def update_wallet_lists(self):
         self.user_listbox.delete(0, tk.END)
@@ -771,7 +1325,7 @@ class ConfiguratorApp:
         chat_data = self.state.get("chats", {}).get(str(self.chat_id), {})
         tracked = chat_data.get("tracked", {})
         
-        self.user_wallets_map = [] # indices match listbox rows
+        self.user_wallets_map = []
         self.token_wallets_map = []
         
         for addr, info in tracked.items():
@@ -788,10 +1342,10 @@ class ConfiguratorApp:
 
     def add_address(self, addr_type):
         if not self.chat_id:
-            messagebox.showwarning("Configuration Error", "Please set and save a Chat ID first.")
+            messagebox.showwarning(self.tr("config_error"), self.tr("chat_id_required"))
             return
             
-        dialog = CustomAddAddressDialog(self.root, addr_type)
+        dialog = CustomAddAddressDialog(self.root, addr_type, tr=self.tr)
         self.root.wait_window(dialog)
         
         if not dialog.result:
@@ -807,69 +1361,72 @@ class ConfiguratorApp:
                 "active": True,
                 "currency": "USD",
                 "interval": 1,
+                "status_interval": 5,
+                "whale_threshold": 1.0,
+                "show_coin_link": True,
+                "show_market_cap": True,
+                "last_status_time": 0.0,
+                "status_txs": [],
                 "tracked": {},
                 "accumulated_txs": []
             }
             
+        if "tracked" not in self.state["chats"][chat_id_str]:
+            self.state["chats"][chat_id_str]["tracked"] = {}
+            
         self.state["chats"][chat_id_str]["tracked"][address] = {
-            "type": addr_type,
-            "name": name
+            "name": name,
+            "type": addr_type
         }
         
-        # Set signature offset so we don't fetch historical transactions on start
-        if "global_last_signatures" not in self.state:
-            self.state["global_last_signatures"] = {}
-        if address not in self.state["global_last_signatures"]:
-            # Default to None, bot will fetch current signatures on launch
-            self.state["global_last_signatures"][address] = None
-            
         self.save_state()
         self.update_wallet_lists()
+        self.wallet_status_lbl.config(text=self.tr("add_user_wallet_success").format(name=name), foreground=gui_styles.ACCENT_GREEN)
 
     def add_user_wallet(self):
         self.add_address("user")
 
     def add_token_wallet(self):
-        self.add_address("wallet")
+        self.add_address("token")
 
-    def remove_address(self, listbox, wallets_map):
+    def remove_address(self, listbox, wallets_map, label):
         if not self.chat_id:
             return
-        selected = listbox.curselection()
-        if not selected:
-            messagebox.showwarning("Selection Error", "Please select an address to remove.")
+        idx = listbox.curselection()
+        if not idx:
+            messagebox.showwarning(self.tr("selection_error"), self.tr("wallet_required"))
             return
             
-        addr = wallets_map[selected[0]]
+        address = wallets_map[idx[0]]
         chat_id_str = str(self.chat_id)
+        chat_data = self.state.get("chats", {}).get(chat_id_str, {})
+        name = chat_data.get("tracked", {}).get(address, {}).get("name", "Unnamed")
         
-        if messagebox.askyesno("Confirm Removal", f"Are you sure you want to stop tracking:\n{addr}?"):
-            if chat_id_str in self.state.get("chats", {}):
-                tracked = self.state["chats"][chat_id_str].get("tracked", {})
-                if addr in tracked:
-                    del tracked[addr]
-                    self.save_state()
-                    self.update_wallet_lists()
+        if not messagebox.askyesno(self.tr("wallet_confirm_title"), self.tr("wallet_confirm_msg").format(name=name)):
+            return
+            
+        if chat_id_str in self.state["chats"] and "tracked" in self.state["chats"][chat_id_str]:
+            if address in self.state["chats"][chat_id_str]["tracked"]:
+                del self.state["chats"][chat_id_str]["tracked"][address]
+                self.save_state()
+                
+        self.update_wallet_lists()
+        label.config(text=self.tr("remove_wallet_success").format(name=name), foreground=gui_styles.ACCENT_RED)
 
     def remove_user_wallet(self):
-        self.remove_address(self.user_listbox, self.user_wallets_map)
+        self.remove_address(self.user_listbox, self.user_wallets_map, self.wallet_status_lbl)
 
     def remove_token_wallet(self):
-        self.remove_address(self.token_listbox, self.token_wallets_map)
+        self.remove_address(self.token_listbox, self.token_wallets_map, self.wallet_status_lbl)
 
     def copy_selected_address(self, listbox, wallets_map):
-        selected = listbox.curselection()
-        if not selected:
-            messagebox.showwarning("Selection Error", "Please select an address to copy.")
+        idx = listbox.curselection()
+        if not idx:
             return
-            
-        addr = wallets_map[selected[0]]
+        address = wallets_map[idx[0]]
         self.root.clipboard_clear()
-        self.root.clipboard_append(addr)
-        self.root.update()
-        
-        self.wallet_status_lbl.config(text="[✓] Address copied to clipboard!")
-        self.root.after(2000, lambda: self.wallet_status_lbl.config(text=""))
+        self.root.clipboard_append(address)
+        self.wallet_status_lbl.config(text=self.tr("copied"), foreground=gui_styles.ACCENT_BLUE)
 
     def clear_log_display(self):
         self.log_text.config(state=tk.NORMAL)
@@ -877,10 +1434,23 @@ class ConfiguratorApp:
         self.log_text.config(state=tk.DISABLED)
 
     def export_config(self):
+        if not self.chat_id:
+            messagebox.showwarning(self.tr("config_error"), self.tr("chat_id_required"))
+            return
+        chat_id_str = str(self.chat_id)
+        chat_data = self.state.get("chats", {}).get(chat_id_str, {})
+        if not chat_data.get("tracked"):
+            messagebox.showwarning(self.tr("export_warning"), self.tr("no_tracked_addresses"))
+            return
+            
+        export_data = {
+            "chats": {
+                chat_id_str: chat_data
+            },
+            "global_last_signatures": self.state.get("global_last_signatures", {})
+        }
+        
         filename = filedialog.asksaveasfilename(
-            parent=self.root,
-            title="Export Tracked List",
-            initialfile="tracked_backup.json",
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All Files", "*.*")]
         )
@@ -889,15 +1459,13 @@ class ConfiguratorApp:
             
         try:
             with open(filename, "w") as f:
-                json.dump(self.state, f, indent=2)
-            messagebox.showinfo("Export Success", f"Configuration successfully exported to:\n{filename}")
+                json.dump(export_data, f, indent=4)
+            messagebox.showinfo(self.tr("success"), self.tr("success_export") + os.path.basename(filename))
         except Exception as e:
-            messagebox.showerror("Export Error", f"Failed to export configuration: {e}")
+            messagebox.showerror(self.tr("error"), self.tr("export_failed").format(error=e))
 
     def import_config(self):
         filename = filedialog.askopenfilename(
-            parent=self.root,
-            title="Import Tracked List",
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All Files", "*.*")]
         )
@@ -909,10 +1477,10 @@ class ConfiguratorApp:
                 imported_data = json.load(f)
                 
             if not isinstance(imported_data, dict) or "chats" not in imported_data:
-                messagebox.showerror("Import Error", "Invalid backup file schema: missing 'chats' object.")
+                messagebox.showerror(self.tr("error"), self.tr("import_schema_error"))
                 return
                 
-            if not messagebox.askyesno("Confirm Import", "This will merge/overwrite your current tracked configuration with the backup file.\nAre you sure you want to proceed?"):
+            if not messagebox.askyesno(self.tr("import_confirm_title"), self.tr("import_confirm_msg")):
                 return
                 
             if "chats" in imported_data:
@@ -935,41 +1503,66 @@ class ConfiguratorApp:
                 
             self.save_state()
             self.update_wallet_lists()
-            messagebox.showinfo("Import Success", "Configuration successfully imported and merged.")
+            messagebox.showinfo(self.tr("success"), self.tr("success_import"))
         except Exception as e:
-            messagebox.showerror("Import Error", f"Failed to import configuration: {e}")
+            messagebox.showerror(self.tr("error"), self.tr("import_failed").format(error=e))
+
+    def read_log_tail(self):
+        if not os.path.exists(LOG_PATH):
+            return []
+        try:
+            file_size = os.path.getsize(LOG_PATH)
+            chunk_size = 8192
+            with open(LOG_PATH, "rb") as f:
+                if file_size > chunk_size:
+                    f.seek(file_size - chunk_size)
+                    content_bytes = f.read()
+                    content = content_bytes.decode("utf-8", errors="replace")
+                    lines = content.splitlines()
+                    if len(lines) > 1:
+                        return lines[1:]
+                    return lines
+                else:
+                    content_bytes = f.read()
+                    content = content_bytes.decode("utf-8", errors="replace")
+                    return content.splitlines()
+        except Exception as e:
+            return [f"Error reading logs: {e}"]
 
     def refresh_logs(self):
         if not self.logs_visible:
             return
             
+        filter_level = self.log_filter_var.get().upper()
+        raw_lines = self.read_log_tail()
+        
+        filtered_lines = []
+        for line in raw_lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            level = "ALL"
+            if " - INFO - " in line:
+                level = "INFO"
+            elif " - WARNING - " in line:
+                level = "WARNING"
+            elif " - ERROR - " in line or " - CRITICAL - " in line:
+                level = "ERROR"
+            
+            if filter_level == "ALL" or filter_level == level:
+                filtered_lines.append((line, level.lower() if level != "ALL" else None))
+                
+        tail = filtered_lines[-40:]
+        
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete("1.0", tk.END)
-        
-        if os.path.exists(LOG_PATH):
-            try:
-                with open(LOG_PATH, "r") as f:
-                    lines = f.readlines()
-                    # Show last 40 lines
-                    tail = lines[-40:]
-                    for line in tail:
-                        # Find level
-                        tag = None
-                        if " - INFO - " in line:
-                            tag = "info"
-                        elif " - WARNING - " in line:
-                            tag = "warning"
-                        elif " - ERROR - " in line or " - CRITICAL - " in line:
-                            tag = "error"
-                        
-                        self.log_text.insert(tk.END, line, tag)
-            except Exception as e:
-                self.log_text.insert(tk.END, f"Error reading logs: {e}\n", "error")
-        else:
-            self.log_text.insert(tk.END, "Log file not created yet. Start the bot to generate logs.\n")
+        for line_str, tag in tail:
+            self.log_text.insert(tk.END, line_str + "\n", tag)
             
         self.log_text.config(state=tk.DISABLED)
-        self.log_text.see(tk.END)
+        if self.log_autoscroll_var.get():
+            self.log_text.see(tk.END)
         
         # Schedule next log refresh in 2 seconds
         if self.logs_visible:
@@ -978,20 +1571,19 @@ class ConfiguratorApp:
     # Process Management
     def start_bot(self):
         if self.tracker_process and self.tracker_process.poll() is None:
-            messagebox.showwarning("Process Error", "Tracker bot is already running.")
+            messagebox.showwarning(self.tr("process_error"), self.tr("process_running"))
             return
             
         if not self.token:
-            messagebox.showwarning("Configuration Error", "Please save a Telegram Bot Token first.")
+            messagebox.showwarning(self.tr("config_error"), self.tr("token_save_first"))
             return
             
-        # Execute tracker in background
         try:
             if getattr(sys, 'frozen', False):
-                # Running as a packaged exe
-                tracker_path = os.path.join(BASE_DIR, "tracker.exe")
+                exe_name = "tracker.exe" if sys.platform == "win32" else "tracker"
+                tracker_path = os.path.join(BASE_DIR, exe_name)
                 if not os.path.exists(tracker_path):
-                    tracker_path = os.path.join(os.path.dirname(sys.executable), "tracker.exe")
+                    tracker_path = os.path.join(os.path.dirname(sys.executable), exe_name)
                 self.tracker_process = subprocess.Popen(
                     [tracker_path],
                     cwd=BASE_DIR,
@@ -999,7 +1591,6 @@ class ConfiguratorApp:
                     stderr=subprocess.DEVNULL
                 )
             else:
-                # Run tracker.py using the same python interpreter
                 self.tracker_process = subprocess.Popen(
                     [sys.executable, "tracker.py"],
                     cwd=BASE_DIR,
@@ -1010,11 +1601,11 @@ class ConfiguratorApp:
             self.pulse_state = True
             self.start_btn.config(state=tk.DISABLED)
             self.stop_btn.config(state=tk.NORMAL)
-            self.status_lbl.config(text="● Running | Uptime: 00:00:00", foreground=ACCENT_GREEN)
+            self.update_status_label()
             logger_msg = "Tracker process launched."
             print(logger_msg)
         except Exception as e:
-            messagebox.showerror("Execution Error", f"Failed to start tracker: {e}")
+            messagebox.showerror(self.tr("execution_error"), self.tr("launch_failed").format(error=e))
 
     def stop_bot(self):
         if self.tracker_process and self.tracker_process.poll() is None:
@@ -1025,7 +1616,7 @@ class ConfiguratorApp:
         self.bot_start_time = None
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
-        self.status_lbl.config(text="● Status: Stopped", foreground=ACCENT_RED)
+        self.update_status_label()
 
     def check_process(self):
         if self.tracker_process:
@@ -1035,86 +1626,26 @@ class ConfiguratorApp:
                 self.bot_start_time = None
                 self.start_btn.config(state=tk.NORMAL)
                 self.stop_btn.config(state=tk.DISABLED)
-                self.status_lbl.config(text="● Status: Stopped", foreground=ACCENT_RED)
-            else:
-                # Running, update uptime and pulse dot
-                if not hasattr(self, "bot_start_time") or self.bot_start_time is None:
-                    self.bot_start_time = time.time()
-                
-                uptime = int(time.time() - self.bot_start_time)
-                h = uptime // 3600
-                m = (uptime % 3600) // 60
-                s = uptime % 60
-                uptime_str = f"{h:02d}:{m:02d}:{s:02d}"
-                
-                if not hasattr(self, "pulse_state"):
-                    self.pulse_state = True
-                self.pulse_state = not self.pulse_state
-                
-                # Toggle between bright green and dim green to represent status pulse
-                dot_color = ACCENT_GREEN if self.pulse_state else "#047857"
-                self.status_lbl.config(text=f"● Running | Uptime: {uptime_str}", foreground=dot_color)
-        else:
-            self.status_lbl.config(text="● Status: Stopped", foreground=ACCENT_RED)
-                
-        # Loop every 1 second
+        self.update_status_label()
         self.root.after(1000, self.check_process)
 
-    def minimize_window(self):
-        self.root.overrideredirect(False)
-        self.root.iconify()
-
-    def set_appwindow(self):
-        if sys.platform == "win32":
-            try:
-                import ctypes
-                self.root.update_idletasks()
-                hwnd = self.root.winfo_id()
-                parent_hwnd = ctypes.windll.user32.GetParent(hwnd)
-                if parent_hwnd:
-                    hwnd = parent_hwnd
-                
-                style = ctypes.windll.user32.GetWindowLongW(hwnd, -20)  # GWL_EXSTYLE
-                style = style & ~0x00000080  # Remove WS_EX_TOOLWINDOW
-                style = style | 0x00040000   # Add WS_EX_APPWINDOW
-                ctypes.windll.user32.SetWindowLongW(hwnd, -20, style)
-                
-                # Prevent recursive Map triggers when deiconifying
-                self.in_map_transition = True
-                self.root.withdraw()
-                self.root.deiconify()
-                self.root.after(100, self.reset_map_transition)
-            except Exception:
-                self.in_map_transition = False
-
-    def reset_map_transition(self):
-        self.in_map_transition = False
-
-    def on_map(self, event):
-        if getattr(self, "in_map_transition", False):
-            return
-        self.root.overrideredirect(True)
-        if sys.platform == "win32":
-            self.set_appwindow()
-        
-    def toggle_maximize(self):
-        if self.is_maximized:
-            self.root.geometry(self.normal_geom)
-            self.is_maximized = False
+    def update_status_label(self):
+        if self.tracker_process and self.tracker_process.poll() is None:
+            uptime = int(time.time() - (self.bot_start_time or time.time()))
+            h = uptime // 3600
+            m = (uptime % 3600) // 60
+            s = uptime % 60
+            uptime_str = f"{h:02d}:{m:02d}:{s:02d}"
+            
+            if not hasattr(self, "pulse_state"):
+                self.pulse_state = True
+            self.pulse_state = not self.pulse_state
+            dot_color = gui_styles.ACCENT_GREEN if self.pulse_state else ("#059669" if self.settings.get("theme") == "Light Mode" else "#047857")
+            
+            running_text = self.tr("status_running").format(uptime=uptime_str)
+            self.status_lbl.config(text=running_text, foreground=dot_color)
         else:
-            self.normal_geom = self.root.geometry()
-            sw = self.root.winfo_screenwidth()
-            sh = self.root.winfo_screenheight()
-            self.root.geometry(f"{sw}x{sh-40}+0+0")
-            self.is_maximized = True
-
-    def toggle_chat_id_visibility(self):
-        if self.chat_id_entry.cget("show") == "*":
-            self.chat_id_entry.config(show="")
-            self.show_chat_id_btn.config(text="Hide")
-        else:
-            self.chat_id_entry.config(show="*")
-            self.show_chat_id_btn.config(text="Show")
+            self.status_lbl.config(text=self.tr("status_stopped"), foreground=gui_styles.ACCENT_RED)
 
     def clean_exit(self):
         self.stop_bot()

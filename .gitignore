@@ -19,3 +19,5 @@ logs/*
 release/
 tracker.exe
 configurator.exe
+solana-wallet-tracker-windows.zip
+solana-wallet-tracker-linux.tar.gz

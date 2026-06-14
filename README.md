@@ -13,6 +13,7 @@ A highly reliable, real-time Solana blockchain wallet and token account tracking
 * **Asynchronous Connection Tests**: Instant validation utility in the GUI to verify Solana RPC health and Telegram Bot tokens/Chat IDs (by sending a test message) before saving configs.
 * **Secure Local Storage**: Credentials and tracking states are stored locally in git-ignored files (`secrets/.env` and `secrets/tracked.json`), preventing private tokens from leaking.
 * **Interactive Telegram Bot Commands**: Full control over settings directly within your Telegram group or private chat using standard commands.
+* **Dynamic Multi-Language Support**: Completely translated GUI supporting English, Russian, and Arabic, applying translations dynamically to all panels, dialog boxes, errors, and warnings.
 
 ---
 
@@ -85,6 +86,12 @@ To prevent sensitive credentials (such as your Telegram Bot API Token or custom 
 ## 🖥️ Desktop Configuration Panel
 
 The Desktop GUI (`configurator.py`) provides an easy interface to control the bot:
+
+![Desktop Configurator Main Panel](assets/screenshot_main.png)
+*Main Dashboard for bot activation, credentials management, and live log monitoring.*
+
+![Desktop Configurator Settings Panel](assets/screenshot_settings.png)
+*App Settings Panel supporting multiple languages (English, Russian, Arabic), font sizes, and dark/light modes.*
 
 1. **Credentials Management**:
    * **Telegram Bot Token**: Insert and hide/show your token.

@@ -23,14 +23,16 @@ load_dotenv(ENV_PATH)
 token = os.getenv("TELEGRAM_BOT_TOKEN")
 chat_id = os.getenv("TELEGRAM_CHAT_ID")
 rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+rpc_urls = [u.strip() for u in rpc_url.split(",")] if rpc_url else []
+active_rpc_url = rpc_urls[0] if rpc_urls else "https://api.mainnet-beta.solana.com"
 
 print("✅ [ENV] Configuration loaded successfully.")
 print(f"  • Telegram Token: {'Configured' if token else 'NOT Configured'}")
 print(f"  • Chat ID: {chat_id if chat_id else 'NOT Configured'}")
-print(f"  • Solana RPC: {rpc_url}\n")
+print(f"  • Solana RPC: {active_rpc_url} (out of {len(rpc_urls)} configured endpoints)\n")
 
 # 2. Test Solana RPC
-print("⏳ [RPC] Testing Solana RPC connection...")
+print(f"⏳ [RPC] Testing Solana RPC connection to: {active_rpc_url}...")
 payload = {
     "jsonrpc": "2.0",
     "id": 1,
@@ -38,7 +40,7 @@ payload = {
     "params": []
 }
 try:
-    r = requests.post(rpc_url, json=payload, headers={"Content-Type": "application/json"}, timeout=8)
+    r = requests.post(active_rpc_url, json=payload, headers={"Content-Type": "application/json"}, timeout=8)
     r.raise_for_status()
     res = r.json()
     if res.get("result") == "ok":
@@ -56,7 +58,7 @@ payload_bal = {
     "params": ["11111111111111111111111111111111"]
 }
 try:
-    r = requests.post(rpc_url, json=payload_bal, headers={"Content-Type": "application/json"}, timeout=8)
+    r = requests.post(active_rpc_url, json=payload_bal, headers={"Content-Type": "application/json"}, timeout=8)
     r.raise_for_status()
     res = r.json()
     val = res.get("result", {}).get("value", 0) / 1e9
