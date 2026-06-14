@@ -93,6 +93,9 @@ The Desktop GUI (`configurator.py`) provides an easy interface to control the bo
 ![Desktop Configurator Settings Panel](assets/screenshot_settings.png)
 *App Settings Panel supporting multiple languages (English, Russian, Arabic), font sizes, and dark/light modes.*
 
+![Desktop Configurator Live Logs](assets/screenshot_logs.png)
+*Live Console and Log Filtering Tab.*
+
 1. **Credentials Management**:
    * **Telegram Bot Token**: Insert and hide/show your token.
    * **Telegram Chat ID**: Save the target chat where notifications will go.
