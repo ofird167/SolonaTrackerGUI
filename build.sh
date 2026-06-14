@@ -69,6 +69,9 @@ echo
 echo "Cleaning up build files..."
 rm -rf build dist tracker.spec configurator.spec
 
+# Delete Windows binary leftovers if they exist to keep Linux tarball clean
+rm -f release/tracker.exe release/configurator.exe
+
 # Create tarball archive
 echo
 echo "Creating release tarball archive..."

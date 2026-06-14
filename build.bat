@@ -84,6 +84,10 @@ rmdir /s /q dist
 del /q tracker.spec
 del /q configurator.spec
 
+:: Delete Linux binary leftovers if they exist to keep Windows ZIP clean
+if exist "release\tracker" del /f /q "release\tracker"
+if exist "release\configurator" del /f /q "release\configurator"
+
 :: Create ZIP archive using PowerShell
 echo.
 echo Creating release ZIP archive...

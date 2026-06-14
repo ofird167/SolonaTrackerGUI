@@ -839,7 +839,7 @@ def handle_import(chat_id, document):
         
     reply_to(chat_id, f"✅ Configuration imported successfully!\n• Currency: <b>{currency}</b>\n• Interval: <b>{interval} minutes</b>\n• Merged <b>{len(valid_tracked)}</b> addresses.")
 
-def format_transaction_group(wallet_name, address, wallet_type, events, currency, show_coin_link=True, show_market_cap=True, whale_threshold=1.0):
+def format_transaction_group(wallet_name, address, wallet_type, events, currency, show_coin_link=True, show_market_cap=True, whale_threshold=1.0, concise=False):
     icon = "👛" if wallet_type == "user" else "🧿"
     
     # Group events by token mint
@@ -892,47 +892,62 @@ def format_transaction_group(wallet_name, address, wallet_type, events, currency
             emoji = "🔴"
             action = "sold"
             
-        # Dexscreener and Rugcheck details
-        pair_url, mcap_val = get_dex_market_data(mint)
-        report = get_rugcheck_report(mint)
-        bundled_val = get_bundled_percentage(report)
-        kol_val = get_kol_count(report)
-        whale_val = get_whale_count(report, whale_threshold)
-        
-        # Coin link
-        if show_coin_link and pair_url:
-            symbol_str = f"<a href='{pair_url}'>{symbol}</a>"
-        else:
-            symbol_str = symbol
-            
-        mcap_str = format_currency(mcap_val, currency) if mcap_val else "N/A"
-        
         solscan_link = f"<a href='https://solscan.io/account/{address}'>Solscan</a>"
-        header = f"Scan complete for {wallet_name} - {solscan_link}"
         
-        body_lines = []
-        if show_market_cap:
-            body_lines.append(f"💰 Market Cap: {mcap_str}")
-        body_lines.append(f"{emoji} {action} {abs(tok_change):,.2f} {symbol_str} ({val_str})")
-        body_lines.append(f"🚨 Bundled: {bundled_val:.2f}%")
-        body_lines.append(f"🔑 KOL Count: {kol_val}")
-        body_lines.append(f"🐳 Whale Count: {whale_val}")
-        
-        body = "\n".join(body_lines)
-        
-        # Build tx list
-        tx_lines = []
-        for sig in sigs[:5]:
-            tx_lines.append(f"Tx: <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
-        if len(sigs) > 5:
-            tx_lines.append(f"(+{len(sigs) - 5} more)")
+        if concise:
+            header = f"{icon} {wallet_name} ({solscan_link})"
+            count_str = f"{tx_count} " if tx_count > 1 else ""
+            body = f"{emoji} {count_str}{action}: {abs(tok_change):,.2f} {symbol} ({mint_short}) ({val_str})"
             
-        msg = "\n".join([header, "", body] + tx_lines)
-        messages.append(msg)
-        
+            tx_lines = []
+            for sig in sigs[:5]:
+                tx_lines.append(f"Tx: <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
+            if len(sigs) > 5:
+                tx_lines.append(f"(+{len(sigs) - 5} more)")
+                
+            msg = "\n".join([header, body] + tx_lines)
+            messages.append(msg)
+        else:
+            # Dexscreener and Rugcheck details
+            pair_url, mcap_val = get_dex_market_data(mint)
+            report = get_rugcheck_report(mint)
+            bundled_val = get_bundled_percentage(report)
+            kol_val = get_kol_count(report)
+            whale_val = get_whale_count(report, whale_threshold)
+            
+            # Coin link
+            if show_coin_link and pair_url:
+                symbol_str = f"<a href='{pair_url}'>{symbol}</a>"
+            else:
+                symbol_str = symbol
+                
+            mcap_str = format_currency(mcap_val, currency) if mcap_val else "N/A"
+            
+            header = f"Scan complete for {wallet_name} - {solscan_link}"
+            
+            body_lines = []
+            if show_market_cap:
+                body_lines.append(f"💰 Market Cap: {mcap_str}")
+            body_lines.append(f"{emoji} {action} {abs(tok_change):,.2f} {symbol_str} ({val_str})")
+            body_lines.append(f"🚨 Bundled: {bundled_val:.2f}%")
+            body_lines.append(f"🔑 KOL Count: {kol_val}")
+            body_lines.append(f"🐳 Whale Count: {whale_val}")
+            
+            body = "\n".join(body_lines)
+            
+            tx_lines = []
+            for sig in sigs[:5]:
+                tx_lines.append(f"Tx: <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
+            if len(sigs) > 5:
+                tx_lines.append(f"(+{len(sigs) - 5} more)")
+                
+            msg = "\n".join([header, "", body] + tx_lines)
+            messages.append(msg)
+            
     # Format SOL only events
     if sol_only_events:
         sigs = [ev["sig"] for ev in sol_only_events]
+        tx_count = len(sigs)
         total_sol = sum(ev["sol_change"] for ev in sol_only_events)
         total_val = sum(ev["value_usd"] for ev in sol_only_events)
         val_str = format_currency(total_val, currency)
@@ -941,18 +956,33 @@ def format_transaction_group(wallet_name, address, wallet_type, events, currency
         action = "received" if total_sol > 0 else "sent"
         
         solscan_link = f"<a href='https://solscan.io/account/{address}'>Solscan</a>"
-        header = f"Scan complete for {wallet_name} - {solscan_link}"
-        body = f"{emoji} {action} {abs(total_sol):,.4f} SOL ({val_str})"
         
-        tx_lines = []
-        for sig in sigs[:5]:
-            tx_lines.append(f"Tx: <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
-        if len(sigs) > 5:
-            tx_lines.append(f"(+{len(sigs) - 5} more)")
+        if concise:
+            header = f"{icon} {wallet_name} ({solscan_link})"
+            count_str = f"{tx_count} " if tx_count > 1 else ""
+            body = f"{emoji} {count_str}{action}: {abs(total_sol):,.4f} SOL (So1111) ({val_str})"
             
-        msg = "\n".join([header, "", body] + tx_lines)
-        messages.append(msg)
-        
+            tx_lines = []
+            for sig in sigs[:5]:
+                tx_lines.append(f"Tx: <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
+            if len(sigs) > 5:
+                tx_lines.append(f"(+{len(sigs) - 5} more)")
+                
+            msg = "\n".join([header, body] + tx_lines)
+            messages.append(msg)
+        else:
+            header = f"Scan complete for {wallet_name} - {solscan_link}"
+            body = f"{emoji} {action} {abs(total_sol):,.4f} SOL ({val_str})"
+            
+            tx_lines = []
+            for sig in sigs[:5]:
+                tx_lines.append(f"Tx: <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
+            if len(sigs) > 5:
+                tx_lines.append(f"(+{len(sigs) - 5} more)")
+                
+            msg = "\n".join([header, "", body] + tx_lines)
+            messages.append(msg)
+            
     return messages
 
 # Alert sender
@@ -971,7 +1001,8 @@ def send_transaction_alert(chat_id, event, currency):
         
     messages = format_transaction_group(
         event["wallet_name"], event["address"], wallet_type, [event], currency,
-        show_coin_link=show_coin_link, show_market_cap=show_market_cap, whale_threshold=whale_threshold
+        show_coin_link=show_coin_link, show_market_cap=show_market_cap, whale_threshold=whale_threshold,
+        concise=True
     )
     for msg in messages:
         make_telegram_request("sendMessage", data={
@@ -1008,7 +1039,8 @@ def send_chat_summary(chat_id, chat_data):
             
         messages = format_transaction_group(
             wallet_name, addr, wallet_type, events, currency,
-            show_coin_link=show_coin_link, show_market_cap=show_market_cap, whale_threshold=whale_threshold
+            show_coin_link=show_coin_link, show_market_cap=show_market_cap, whale_threshold=whale_threshold,
+            concise=True
         )
         for msg in messages:
             make_telegram_request("sendMessage", data={
@@ -1613,9 +1645,51 @@ def summary_scheduler_loop():
             # Process scheduled status scans
             for chat_id in chats_for_status:
                 try:
-                    report_text = format_status_report(chat_id, clear_after=True)
-                    if report_text:
-                        reply_to(chat_id, report_text)
+                    with state_lock:
+                        chat_data = state.get("chats", {}).get(str(chat_id), {})
+                        status_txs = list(chat_data.get("status_txs", []))
+                        currency = chat_data.get("currency", "USD")
+                        show_coin_link = chat_data.get("show_coin_link", True)
+                        show_market_cap = chat_data.get("show_market_cap", True)
+                        whale_threshold = chat_data.get("whale_threshold", 1.0)
+                    
+                    if status_txs:
+                        # Group transactions by wallet address
+                        wallet_groups = {}
+                        for tx in status_txs:
+                            addr = tx["address"]
+                            if addr not in wallet_groups:
+                                wallet_groups[addr] = []
+                            wallet_groups[addr].append(tx)
+                            
+                        for addr, events in wallet_groups.items():
+                            with state_lock:
+                                addr_info = chat_data.get("tracked", {}).get(addr, {})
+                                wallet_type = addr_info.get("type", "user")
+                                wallet_name = addr_info.get("name", "Unnamed")
+                                
+                            messages = format_transaction_group(
+                                wallet_name, addr, wallet_type, events, currency,
+                                show_coin_link=show_coin_link, show_market_cap=show_market_cap,
+                                whale_threshold=whale_threshold, concise=False
+                            )
+                            for msg in messages:
+                                make_telegram_request("sendMessage", data={
+                                    "chat_id": chat_id,
+                                    "text": msg,
+                                    "parse_mode": "HTML",
+                                    "disable_web_page_preview": True
+                                })
+                                
+                    # Clear status_txs and update last_status_time
+                    with state_lock:
+                        current_state = safe_read_state_file(state)
+                        cid_str = str(chat_id)
+                        if cid_str in current_state.get("chats", {}):
+                            current_state["chats"][cid_str]["status_txs"] = []
+                            current_state["chats"][cid_str]["last_status_time"] = now
+                            state = current_state
+                            save_state_unlocked()
                 except Exception as e:
                     logger.error(f"Scheduled status report failed for chat {chat_id}: {e}")
                     # Prevent spinning if report repeatedly fails
@@ -1633,6 +1707,15 @@ def summary_scheduler_loop():
         time.sleep(2)
 
 if __name__ == "__main__":
+    import socket
+    try:
+        # Bind to a local port to prevent multiple bot instances from running concurrently
+        instance_lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        instance_lock.bind(("127.0.0.1", 49000))
+    except OSError:
+        print("Error: Another instance of Tracker Bot is already running.")
+        sys.exit(1)
+
     logger.info("Starting Solana Wallet Tracker Bot...")
     load_state()
     
