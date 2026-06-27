@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-06-27
+
+### Added
+- **Tkinter-to-Flet GUI Migration:** Fully refactored the desktop client to Flet (Flutter-based python framework), creating a modern responsive dark-themed sidebar dashboard matching high-fidelity mockups.
+- **Asynchronous Real-Time Balance Loading:** Displays actual SOL balances of tracked user wallets directly on dashboard cards and row lists via background RPC queries, preventing GUI thread freezing.
+- **Headless Local Browser Fallback:** Auto-detects headless Linux or WSL environments lacking a window display manager on boot, launching the panel as a local web page.
+- **Unified Address Modal Dialog:** Added a single modal input popup that inspects Solana accounts on-chain, resolves token owner/mint parameters, and registers them.
+- **On-Chain Address Auto-Classification & Verification:** Dynamically inspects account information via Solana RPC `getAccountInfo` to distinguish between User Wallets and Specific Token Accounts.
+- **Interactive Telegram Confirmation Prompts:** Pasting a raw Solana address in the bot triggers an inline keyboard asking the user if they want to add it as a User Wallet or a Specific Token Account.
+- **Simplified `/add` Command:** Deprecated `/add u` and `/add w` command prefixes. The simplified `/add <address> [name]` command automatically inspects the address on-chain and routes it to the correct watchlist category.
+- **Pinned Control Panel Dashboard:** Added interactive inline buttons under the pinned start message to refresh portfolio balances, display live logs, view active parameters, and pause/resume alerts.
+- **60-Second Alert Batching & USD Noise Filtering:** Merges multiple transaction events occurring within 60 seconds into a single grouped message and blocks alerts below a customizable USD threshold.
+- **Auto-Delete Telegram Messages:** Automatically deletes outdated command responses to maintain a clean chat history on mobile.
+- **Configurator Watchdog Monitor:** Background service that automatically restarts the tracker bot subprocess if it terminates unexpectedly.
+- **System Tray Minimization:** Minimizes the configurator GUI window to a system tray icon via `pystray` and `pillow` (with graceful fallback for Linux systems without GTK bindings).
+- **OS Theme Auto-Sync:** Auto-detects GNOME dark theme settings on Linux boot.
+- **RPC presets & Premium builders:** Dropdown selections for free Solana RPCs and builder fields for Helius and QuickNode premium API endpoints.
+- **GitHub Auto-Updater:** Asynchronously queries releases on startup and displays an update banner if a newer release exists.
+- **Database Self-Repair Migration:** Auto-migrates and heals any mismatched address categories in `secrets/tracked.json` at bot startup, standardizing old `"wallet"` label records to `"token"`.
+
+### Fixed
+- **Live Console Log Truncation:** Truncates the physical `logs/tracker.log` log file when "Clear Console" is clicked, preventing log refreshes from re-displaying cleared events.
+- **Solana RPC Rate-Limit Flood:** Fixed a bug where the scheduler thread triggered on-chain address classifications on every reload (every 2 seconds), flooding the RPC and causing rate limits (HTTP 429/403) and runtime locks. Address migrations now run exactly once at bot startup.
+- **Solana RPC Failover Integration:** Integrated alternative RPC failover loops across all configurator network operations (balance checking, testing connections, and adding/verifying wallets) to prevent connection timeouts and `0.00 SOL` balance display failures.
+
 ## [1.3.0] - 2026-06-14
 
 ### Added

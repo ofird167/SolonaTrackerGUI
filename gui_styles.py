@@ -98,3 +98,25 @@ def setup_styles(font_size=10, theme="Dark Mode", root=None):
         root.option_add("*TCombobox*Listbox.selectBackground", ACCENT_BLUE)
         root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
         root.option_add("*TCombobox*Listbox.font", normal_font)
+
+    # Label styles for metrics and cards
+    style.configure("MetricVal.TLabel", background=BG_CARD, foreground=ACCENT_GREEN, font=(font_family, font_size + 4, "bold"))
+    style.configure("MetricLbl.TLabel", background=BG_CARD, foreground=TEXT_MUTED, font=(font_family, font_size - 1 if font_size > 8 else 8))
+    style.configure("StatusOn.TLabel", background=BG_MAIN, foreground=ACCENT_GREEN, font=bold_font)
+    style.configure("StatusOff.TLabel", background=BG_MAIN, foreground=ACCENT_RED, font=bold_font)
+
+def bind_hover(widget, hover_bg, normal_bg):
+    """Binds standard mouse hover behavior to basic Tkinter widgets."""
+    def on_enter(e):
+        try:
+            widget.config(bg=hover_bg)
+        except Exception:
+            pass
+    def on_leave(e):
+        try:
+            widget.config(bg=normal_bg)
+        except Exception:
+            pass
+    widget.bind("<Enter>", on_enter)
+    widget.bind("<Leave>", on_leave)
+

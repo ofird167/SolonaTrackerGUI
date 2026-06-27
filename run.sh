@@ -37,9 +37,9 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Check if tkinter is available and if we want GUI mode
+# Check if flet is available and if we want GUI mode
 GUI_SUPPORTED=0
-if python3 -c "import tkinter" &>/dev/null; then
+if python3 -c "import flet" &>/dev/null; then
     GUI_SUPPORTED=1
 fi
 
@@ -58,8 +58,8 @@ if [ $GUI_SUPPORTED -eq 1 ] && [ $BOT_ONLY -eq 0 ]; then
 else
     # Fallback/Direct run
     if [ $BOT_ONLY -eq 0 ]; then
-        echo "[WARNING] Tkinter (GUI library) is not installed in this Linux/WSL environment."
-        echo "To run the GUI, install it using: sudo apt install python3-tk"
+        echo "[WARNING] Flet is not installed in the Python environment."
+        echo "Please install it using: pip install flet"
         echo "Falling back to running the Tracker Bot directly..."
         echo "----------------------------------------------"
     else

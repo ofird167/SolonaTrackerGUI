@@ -9,7 +9,9 @@ import traceback
 import io
 import threading
 import requests
+import datetime
 from dotenv import load_dotenv
+
 
 # Set up paths
 if getattr(sys, 'frozen', False):
@@ -101,6 +103,50 @@ def load_state():
     global state
     with state_lock:
         state = safe_read_state_file({"chats": {}, "global_last_signatures": {}})
+
+def migrate_tracked_json_types():
+    logger.info("Checking and migrating tracked address types on-chain...")
+    with state_lock:
+        migrated = False
+        chats = state.get("chats", {})
+        for chat_id, chat_data in chats.items():
+            tracked = chat_data.get("tracked", {})
+            for addr, info in list(tracked.items()):
+                t_type = info.get("type", "user")
+                
+                # Standardize old "wallet" label to "token"
+                if t_type == "wallet":
+                    info["type"] = "token"
+                    t_type = "token"
+                    migrated = True
+                
+                # Check actual type on-chain
+                detected = identify_address(addr)
+                if detected == "TOKEN" and t_type == "user":
+                    logger.info(f"Auto-migrating {addr} from User Wallet ('user') to Specific Token Account ('token')")
+                    info["type"] = "token"
+                    try:
+                        res = solana_client._call("getAccountInfo", [addr, {"encoding": "jsonParsed"}])
+                        if res and res.get("value"):
+                            val = res["value"]
+                            parsed_data = val.get("data", {})
+                            if isinstance(parsed_data, dict) and parsed_data.get("parsed"):
+                                info_node = parsed_data["parsed"].get("info", {})
+                                info["owner"] = info_node.get("owner")
+                                info["mint"] = info_node.get("mint")
+                    except Exception:
+                        pass
+                    migrated = True
+                elif detected == "WALLET" and t_type == "token":
+                    logger.info(f"Auto-migrating {addr} from Specific Token Account ('token') to User Wallet ('user')")
+                    info["type"] = "user"
+                    info.pop("owner", None)
+                    info.pop("mint", None)
+                    migrated = True
+                    
+        if migrated:
+            save_state_unlocked()
+            logger.info("On-chain address type migrations completed and saved to secrets/tracked.json.")
 
 def save_state_unlocked():
     try:
@@ -216,6 +262,87 @@ class SolanaClient:
 # Global variables for clients/cache
 rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 solana_client = SolanaClient(rpc_url)
+
+# Hot reload state
+last_env_mtime = 0.0
+
+def check_hot_reload():
+    global last_env_mtime, TELEGRAM_BOT_TOKEN, solana_client, rpc_url
+    if os.path.exists(ENV_PATH):
+        try:
+            mtime = os.path.getmtime(ENV_PATH)
+            if last_env_mtime == 0.0:
+                last_env_mtime = mtime
+            elif mtime > last_env_mtime:
+                logger.info("Detected change in secrets/.env. Hot reloading configuration...")
+                last_env_mtime = mtime
+                load_dotenv(ENV_PATH, override=True)
+                
+                # Update tokens
+                TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+                # Update logging formatter with new token if necessary
+                formatter.token = TELEGRAM_BOT_TOKEN
+                
+                new_rpc = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+                if new_rpc != rpc_url:
+                    logger.info(f"Updating Solana Client RPC URL from {rpc_url} to {new_rpc}")
+                    rpc_url = new_rpc
+                    solana_client = SolanaClient(rpc_url)
+        except Exception as e:
+            logger.error(f"Failed to hot reload env: {e}")
+
+def get_mint_for_token_account(address):
+    # Cache to avoid calling RPC repeatedly
+    if not hasattr(get_mint_for_token_account, "cache"):
+        get_mint_for_token_account.cache = {}
+    if address in get_mint_for_token_account.cache:
+        return get_mint_for_token_account.cache[address]
+    try:
+        res = solana_client._call("getAccountInfo", [address, {"encoding": "jsonParsed"}])
+        if res and res.get("value"):
+            parsed_data = res["value"].get("data", {})
+            if isinstance(parsed_data, dict) and parsed_data.get("parsed"):
+                mint = parsed_data["parsed"].get("info", {}).get("mint")
+                if mint:
+                    get_mint_for_token_account.cache[address] = mint
+                    return mint
+    except Exception as e:
+        logger.warning(f"Failed to get mint for token account {address}: {e}")
+    return None
+
+def classify_transaction(sol_change, token_changes, account_keys):
+    # Check staking program IDs in account keys
+    staking_programs = {
+        "Config1111111111111111111111111111111111111",
+        "Stake11111111111111111111111111111111111111"
+    }
+    has_stake_program = any(k in staking_programs for k in account_keys)
+    if has_stake_program:
+        return "🥩 Stake"
+        
+    # Check if there is both an inflow and an outflow
+    inflow = False
+    outflow = False
+    
+    if sol_change > 0.005:
+        inflow = True
+    elif sol_change < -0.005:
+        outflow = True
+        
+    for mint, details in token_changes.items():
+        change = details.get("change", 0.0)
+        if change > 0.0001:
+            inflow = True
+        elif change < -0.0001:
+            outflow = True
+            
+    if inflow and outflow:
+        return "🔄 Trade"
+    elif inflow:
+        return "⚡ Transfer (Receive)"
+    elif outflow:
+        return "⚡ Transfer (Send)"
+    return "⚡ Transfer"
 
 token_metadata_cache = {}
 fiat_rates_cache = {'rates': {}, 'last_update': 0.0}
@@ -480,6 +607,14 @@ def make_telegram_request(method, data=None, files=None):
     if not TELEGRAM_BOT_TOKEN:
         logger.error("No TELEGRAM_BOT_TOKEN configured.")
         return None
+        
+    if method == "sendMessage" and data and "chat_id" in data:
+        cid = str(data["chat_id"])
+        with state_lock:
+            is_silent = state.get("chats", {}).get(cid, {}).get("silent_alerts", False)
+        if is_silent:
+            data["disable_notification"] = True
+            
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{method}"
     try:
         if files:
@@ -492,34 +627,290 @@ def make_telegram_request(method, data=None, files=None):
         logger.error(f"Telegram API request failed for {method}: {e}")
         return None
 
-def reply_to(chat_id, text):
-    make_telegram_request("sendMessage", data={
+
+def format_duration(minutes):
+    if minutes >= 60:
+        hrs = minutes // 60
+        mins = minutes % 60
+        if mins == 0:
+            return f"{hrs}:00 hour{'s' if hrs > 1 else ''}"
+        return f"{hrs}:{mins:02d} hour{'s' if hrs > 1 else ''}"
+    else:
+        return f"{minutes} minutes"
+
+def reply_to(chat_id, text, reply_markup=None):
+    payload = {
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": True
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    make_telegram_request("sendMessage", data=payload)
+
+def send_cleanup_reply(chat_id, text, reply_markup=None):
+    chat_id_str = str(chat_id)
+    with state_lock:
+        last_msg_id = state.get("chats", {}).get(chat_id_str, {}).get("last_bot_msg_id")
+        
+    if last_msg_id:
+        try:
+            make_telegram_request("deleteMessage", data={"chat_id": chat_id, "message_id": last_msg_id})
+        except Exception:
+            pass
+            
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+        
+    res = make_telegram_request("sendMessage", data=payload)
+    if res and res.get("ok"):
+        msg_id = res.get("result", {}).get("message_id")
+        with state_lock:
+            current_state = safe_read_state_file(state)
+            if chat_id_str in current_state.get("chats", {}):
+                current_state["chats"][chat_id_str]["last_bot_msg_id"] = msg_id
+                state = current_state
+                save_state_unlocked()
+
+def send_dashboard(chat_id):
+    global state
+    text = (
+        "⚙️ <b>Solana Tracker Control Panel</b>\n\n"
+        "Use the buttons below to interact with the tracker bot from your phone without typing commands."
+    )
+    # Check current active state to show correct text
+    chat_id_str = str(chat_id)
+    with state_lock:
+        active = state.get("chats", {}).get(chat_id_str, {}).get("active", True)
+    pause_btn_text = "⏸️ Pause Bot" if active else "▶️ Resume Bot"
+    pause_callback = "pause_bot" if active else "resume_bot"
+    
+    markup = {
+        "inline_keyboard": [
+            [
+                {"text": "📊 Portfolio", "callback_data": "refresh_balance"},
+                {"text": "⚡ Refresh Logs", "callback_data": "refresh_logs"}
+            ],
+            [
+                {"text": "⚙️ Settings Summary", "callback_data": "dashboard_settings"},
+                {"text": pause_btn_text, "callback_data": pause_callback}
+            ]
+        ]
+    }
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "reply_markup": markup
+    }
+    res = make_telegram_request("sendMessage", data=payload)
+    if res and res.get("ok"):
+        msg_id = res.get("result", {}).get("message_id")
+        try:
+            make_telegram_request("pinChatMessage", data={"chat_id": chat_id, "message_id": msg_id, "disable_notification": True})
+        except Exception:
+            pass
+        with state_lock:
+            current_state = safe_read_state_file(state)
+            if chat_id_str in current_state.get("chats", {}):
+                current_state["chats"][chat_id_str]["dashboard_message_id"] = msg_id
+                state = current_state
+                save_state_unlocked()
+
+def update_dashboard_markup(chat_id, message_id, active):
+    pause_btn_text = "⏸️ Pause Bot" if active else "▶️ Resume Bot"
+    pause_callback = "pause_bot" if active else "resume_bot"
+    markup = {
+        "inline_keyboard": [
+            [
+                {"text": "📊 Portfolio", "callback_data": "refresh_balance"},
+                {"text": "⚡ Refresh Logs", "callback_data": "refresh_logs"}
+            ],
+            [
+                {"text": "⚙️ Settings Summary", "callback_data": "dashboard_settings"},
+                {"text": pause_btn_text, "callback_data": pause_callback}
+            ]
+        ]
+    }
+    make_telegram_request("editMessageReplyMarkup", data={
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "reply_markup": markup
     })
+
+startup_time = time.time()
+recent_alerts = []
+recent_alerts_lock = threading.Lock()
+
+def register_telegram_commands():
+    commands = [
+        {"command": "start", "description": "Show the control dashboard"},
+        {"command": "status", "description": "Show current tracker health and stats"},
+        {"command": "last", "description": "Retrieve the 5 most recent transaction alerts"},
+        {"command": "alert", "description": "Toggle Silent vs Active alert mode"},
+        {"command": "interval", "description": "Set summary alert frequency"},
+        {"command": "help", "description": "Show helper menu"}
+    ]
+    make_telegram_request("setMyCommands", data={"commands": commands})
+
+
+def handle_status_command(chat_id):
+    uptime_seconds = int(time.time() - startup_time)
+    h = uptime_seconds // 3600
+    m = (uptime_seconds % 3600) // 60
+    s = uptime_seconds % 60
+    uptime_str = f"{h}h {m}m {s}s"
+    
+    slot = None
+    try:
+        slot = solana_client._call("getSlot", [])
+    except Exception:
+        pass
+        
+    status_text = "🟢" if slot else "🔴"
+    slot_str = str(slot) if slot else "N/A"
+    
+    report = f"🤖 <b>Status:</b> {status_text} | ⏳ <b>Uptime:</b> {uptime_str} | 📦 <b>Last Slot:</b> {slot_str}"
+    send_cleanup_reply(chat_id, report)
+
+def handle_last_command(chat_id):
+    with recent_alerts_lock:
+        alerts = list(recent_alerts)
+    if not alerts:
+        send_cleanup_reply(chat_id, "ℹ️ No transaction alerts have been recorded since the bot started.")
+        return
+        
+    send_cleanup_reply(chat_id, f"📋 <b>Last {len(alerts)} Transactions:</b>")
+    for msg in alerts:
+        payload = {
+            "chat_id": chat_id,
+            "text": msg["text"],
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }
+        if msg.get("reply_markup"):
+            payload["reply_markup"] = msg["reply_markup"]
+        make_telegram_request("sendMessage", data=payload)
+
+def handle_alert_command(chat_id):
+    chat_id_str = str(chat_id)
+    with state_lock:
+        current_state = safe_read_state_file(state)
+        if chat_id_str in current_state.get("chats", {}):
+            current = current_state["chats"][chat_id_str].get("silent_alerts", False)
+            new_val = not current
+            current_state["chats"][chat_id_str]["silent_alerts"] = new_val
+            state = current_state
+            save_state_unlocked()
+    mode_str = "🔇 Silent Mode (No Sound)" if new_val else "🔊 Active Mode (With Sound)"
+    send_cleanup_reply(chat_id, f"🔔 Alert notification mode changed to: <b>{mode_str}</b>")
+
+def identify_address(address_str):
+    try:
+        res = solana_client._call("getAccountInfo", [address_str, {"encoding": "jsonParsed"}])
+        if not res or res.get("value") is None:
+            if re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", address_str):
+                return "WALLET"
+            return "INVALID_OR_EMPTY"
+            
+        val = res["value"]
+        owner = val.get("owner")
+        
+        if owner == "11111111111111111111111111111111":
+            return "WALLET"
+        elif owner in ("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbkh56NSs27s376uaR659755iy3Bbz6n26"):
+            return "TOKEN"
+        else:
+            return "OTHER_PROGRAM"
+    except Exception:
+        return "ERROR"
+
+def add_wallet_flow(chat_id, addr_type, address, custom_name):
+    if not re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", address):
+        send_cleanup_reply(chat_id, "❌ Invalid Solana address base58 format.")
+        return
+        
+    owner_addr = None
+    token_mint = None
+    detected_type = addr_type
+    
+    try:
+        res = solana_client._call("getAccountInfo", [address, {"encoding": "jsonParsed"}])
+        if res and res.get("value"):
+            val = res["value"]
+            owner = val.get("owner")
+            if owner in ("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbkh56NSs27s376uaR659755iy3Bbz6n26"):
+                detected_type = "token"
+                parsed_data = val.get("data", {})
+                if isinstance(parsed_data, dict) and parsed_data.get("parsed"):
+                    info_node = parsed_data["parsed"].get("info", {})
+                    owner_addr = info_node.get("owner")
+                    token_mint = info_node.get("mint")
+            else:
+                detected_type = "user"
+    except Exception as e:
+        logger.warning(f"Error auto-detecting wallet type for {address}: {e}")
+
+    sigs = solana_client.get_signatures_for_address(address, limit=1)
+    last_sig = sigs[0].get("signature") if sigs and len(sigs) > 0 else None
+    
+    with state_lock:
+        chat_id_str = str(chat_id)
+        if "chats" not in state:
+            state["chats"] = {}
+        if chat_id_str not in state["chats"]:
+            state["chats"][chat_id_str] = get_default_chat_state()
+            
+        tracked_entry = {
+            "type": detected_type,
+            "name": custom_name
+        }
+        if owner_addr:
+            tracked_entry["owner"] = owner_addr
+        if token_mint:
+            tracked_entry["mint"] = token_mint
+            
+        state["chats"][chat_id_str]["tracked"][address] = tracked_entry
+        
+        if "global_last_signatures" not in state:
+            state["global_last_signatures"] = {}
+        if address not in state["global_last_signatures"] or not state["global_last_signatures"][address]:
+            state["global_last_signatures"][address] = last_sig
+        save_state_unlocked()
+        
+    type_lbl = "User Wallet" if detected_type == "user" else "Specific Token Account"
+    extra_info = ""
+    if detected_type == "token":
+        extra_info += f"\nOwner: <code>{owner_addr}</code>" if owner_addr else ""
+        extra_info += f"\nMint: <code>{token_mint}</code>" if token_mint else ""
+    send_cleanup_reply(chat_id, f"✅ Tracking added for {type_lbl}:\n<code>{address}</code>{extra_info}\nName: <code>{custom_name}</code>")
+
+
+
 
 def send_help(chat_id):
     text = (
         "👋 <b>Solana Wallet Tracker Bot Help</b>\n\n"
-        "<b>Available Commands:</b>\n"
-        "• <code>/add u &lt;address&gt; [CUSTOM NAME]</code> - Track a user wallet (all tokens and SOL)\n"
-        "• <code>/add w &lt;address&gt; [CUSTOM NAME]</code> - Track a specific token account address\n"
-        "• <code>/name &lt;address&gt; &lt;name&gt;</code> - Give a friendly name to a wallet\n"
-        "• <code>/remove &lt;address_or_name&gt;</code> - Stop tracking an address/name\n"
-        "• <code>/show</code> - List all currently tracked addresses\n"
-        "• <code>/balance</code> - Show current balances of all tracked addresses\n"
-        "• <code>/status</code> - Scan and show security details of all tracked wallets\n"
-        "• <code>/currency &lt;code&gt;</code> - Change display currency (USD, NIS, CAD, EUR...)\n"
-        "• <code>/interval &lt;mins&gt;</code> - Alert summary frequency in minutes (1 = immediate)\n"
-        "• <code>/sinterval &lt;mins&gt;</code> - Status notification frequency in minutes (default is 5)\n"
-        "• <code>/export</code> - Download JSON backup of your tracked list\n"
-        "• <code>/import</code> - Upload JSON backup (reply to JSON document with /import)\n"
-        "• <code>/stop</code> - Pause notifications for this chat\n"
-        "• <code>/help</code> - Show this menu"
+        "<b>Core Commands:</b>\n"
+        "• <code>/start</code> - Display the Control Panel Dashboard\n"
+        "• <code>/status</code> - Show bot health, uptime, and current slot\n"
+        "• <code>/last</code> - Show the 5 most recent transaction alerts\n"
+        "• <code>/alert</code> - Toggle Silent vs Active alert mode\n\n"
+        "<b>Smart Input Shortcuts (No commands needed!):</b>\n"
+        "• Send any <b>Solana Address</b> to start tracking it automatically\n"
+        "• Send any <b>number</b> (e.g. <code>50</code> or <code>$10.5</code>) to set the minimum alert USD threshold\n"
+        "• Type <code>add [address] [name]</code> to add a wallet with a custom name\n"
+        "• Type <code>price [token]</code> (e.g. <code>price SOL</code>) to get the current price"
     )
     reply_to(chat_id, text)
+
 
 # Balance formatter
 def format_balance(chat_id):
@@ -528,7 +919,7 @@ def format_balance(chat_id):
         
     tracked = chat_data.get("tracked", {})
     if not tracked:
-        return "No wallets are currently tracked in this chat. Use <code>/add u &lt;address&gt;</code> to start."
+        return "No wallets are currently tracked in this chat. Use <code>/add &lt;address&gt;</code> to start."
         
     currency = chat_data.get("currency", "USD")
     sol_price = get_sol_price()
@@ -540,13 +931,24 @@ def format_balance(chat_id):
         name = info.get("name", "Unnamed")
         addr_type = info.get("type", "user")
         
-        lines.append(f"👤 <b>{name}</b> (<a href='https://solscan.io/account/{addr}'><code>{addr[:4]}...{addr[-4:]}</code></a>) [<i>{addr_type}</i>]")
+        if addr_type == "token":
+            mint_addr = get_mint_for_token_account(addr)
+            link = f"https://solscan.io/token/{mint_addr}" if mint_addr else f"https://solscan.io/account/{addr}"
+        else:
+            link = f"https://solscan.io/account/{addr}"
+            
+        lines.append(f"👤 <b>{name}</b> (<a href='{link}'><code>{addr[:4]}...{addr[-4:]}</code></a>) [<i>{addr_type}</i>]")
+        
+        # We will list assets inside a code block for clean alignment
+        table_rows = []
+        table_rows.append(f"{'Asset':<8} {'Amount':<10} {'Value'}")
+        table_rows.append("─" * 28)
         
         # SOL Balance
         sol_bal = solana_client.get_balance(addr)
         sol_val_usd = sol_bal * sol_price
         total_usd_all += sol_val_usd
-        lines.append(f"  • SOL: {sol_bal:,.4f} SOL ({format_currency(sol_val_usd, currency)})")
+        table_rows.append(f"{'SOL':<8} {sol_bal:<10,.4f} {format_currency(sol_val_usd, currency)}")
         
         # Token Balances
         token_accounts = solana_client.get_token_accounts(addr)
@@ -562,11 +964,14 @@ def format_balance(chat_id):
                     symbol, price = get_token_metadata(mint)
                     val_usd = amount * price
                     total_usd_all += val_usd
-                    lines.append(f"  • <a href='https://solscan.io/token/{mint}'>{symbol}</a>: {amount:,.4f} ({format_currency(val_usd, currency)})")
+                    table_rows.append(f"{symbol[:6]:<8} {amount:<10,.2f} {format_currency(val_usd, currency)}")
+                    
+        lines.append("<pre>" + "\n".join(table_rows) + "</pre>")
         lines.append("")
         
     lines.append(f"<b>Total Value: {format_currency(total_usd_all, currency)}</b>")
     return "\n".join(lines)
+
 
 def format_status_report(chat_id, clear_after=False):
     global state
@@ -575,7 +980,7 @@ def format_status_report(chat_id, clear_after=False):
     
     tracked = chat_data.get("tracked", {})
     if not tracked:
-        return "No wallets are currently tracked in this chat. Use <code>/add u &lt;address&gt;</code> to start."
+        return "No wallets are currently tracked in this chat. Use <code>/add &lt;address&gt;</code> to start."
         
     currency = chat_data.get("currency", "USD")
     sol_price = get_sol_price()
@@ -596,7 +1001,13 @@ def format_status_report(chat_id, clear_after=False):
             
         addr_type = info.get("type", "user")
         
-        solscan_link = f"<a href='https://solscan.io/account/{addr}'>Solscan</a>"
+        if addr_type == "token":
+            mint_addr = get_mint_for_token_account(addr)
+            link = f"https://solscan.io/token/{mint_addr}" if mint_addr else f"https://solscan.io/account/{addr}"
+        else:
+            link = f"https://solscan.io/account/{addr}"
+            
+        solscan_link = f"<a href='{link}'>Solscan</a>"
         lines.append(f"Scan complete for <b>{name}</b> - {solscan_link}")
         
         # Aggregate buys/sells of tokens for this wallet since last status interval
@@ -721,6 +1132,113 @@ def format_status_report(chat_id, clear_after=False):
                 
     return "\n".join(lines).strip()
 
+def format_daily_summary(chat_id):
+    global state
+    with state_lock:
+        chat_data = state.get("chats", {}).get(str(chat_id), {})
+    tracked = chat_data.get("tracked", {})
+    if not tracked:
+        return "No wallets tracked. Cannot generate portfolio snapshot."
+        
+    currency = chat_data.get("currency", "USD")
+    sol_price = get_sol_price()
+    
+    # Calculate current total value
+    total_val_usd = 0.0
+    token_holdings = {} # mint -> (symbol, amount, usd_val)
+    
+    lines = [
+        "📊 <b>Daily Portfolio Snapshot</b>",
+        f"📅 Date: <code>{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</code>",
+        "─" * 24
+    ]
+    
+    for addr, info in tracked.items():
+        # SOL Balance
+        sol_bal = solana_client.get_balance(addr)
+        sol_val = sol_bal * sol_price
+        total_val_usd += sol_val
+        if "SOL" not in token_holdings:
+            token_holdings["SOL"] = ("SOL", 0.0, 0.0)
+        t_sym, t_amt, t_val = token_holdings["SOL"]
+        token_holdings["SOL"] = ("SOL", t_amt + sol_bal, t_val + sol_val)
+        
+        # Token accounts
+        try:
+            token_accounts = solana_client.get_token_accounts(addr)
+            if token_accounts:
+                for item in token_accounts.get("value", []):
+                    parsed = item.get("account", {}).get("data", {}).get("parsed", {})
+                    info_node = parsed.get("info", {})
+                    mint = info_node.get("mint")
+                    amount = float(info_node.get("tokenAmount", {}).get("uiAmount", 0.0))
+                    if amount > 0.0001:
+                        symbol, price = get_token_metadata(mint)
+                        val = amount * price
+                        total_val_usd += val
+                        if mint not in token_holdings:
+                            token_holdings[mint] = (symbol, 0.0, 0.0)
+                        t_sym, t_amt, t_val = token_holdings[mint]
+                        token_holdings[mint] = (symbol, t_amt + amount, t_val + val)
+        except Exception as e:
+            logger.warning(f"Error fetching token accounts for snapshot {addr}: {e}")
+                    
+    # Read/compare history
+    last_snapshots = chat_data.get("snapshots", {})
+    prev_val_usd = None
+    if last_snapshots:
+        sorted_dates = sorted(last_snapshots.keys(), reverse=True)
+        if sorted_dates:
+            prev_val_usd = last_snapshots[sorted_dates[0]]
+            
+    # Format PnL
+    curr_formatted = format_currency(total_val_usd, currency)
+    lines.append(f"💰 <b>Total Portfolio Value:</b> {curr_formatted}")
+    
+    if prev_val_usd is not None:
+        pnl_usd = total_val_usd - prev_val_usd
+        pnl_pct = (pnl_usd / prev_val_usd * 100) if prev_val_usd > 0 else 0.0
+        pnl_formatted = format_currency(pnl_usd, currency)
+        sign = "+" if pnl_usd >= 0 else ""
+        emoji = "📈" if pnl_usd >= 0 else "📉"
+        lines.append(f"{emoji} <b>24h PnL:</b> {sign}{pnl_formatted} ({sign}{pnl_pct:.2f}%)")
+    else:
+        lines.append("📈 <b>24h PnL:</b> Initial snapshot recorded. (PnL tracking starts tomorrow!)")
+        
+    # Store snapshot in state
+    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    with state_lock:
+        current_state = safe_read_state_file(state)
+        chat_id_str = str(chat_id)
+        if chat_id_str in current_state.get("chats", {}):
+            if "snapshots" not in current_state["chats"][chat_id_str]:
+                current_state["chats"][chat_id_str]["snapshots"] = {}
+            current_state["chats"][chat_id_str]["snapshots"][today_str] = total_val_usd
+            snaps = current_state["chats"][chat_id_str]["snapshots"]
+            if len(snaps) > 30:
+                oldest_date = sorted(snaps.keys())[0]
+                del snaps[oldest_date]
+            state = current_state
+            save_state_unlocked()
+        
+    lines.append("")
+    lines.append("🪙 <b>Top Holdings:</b>")
+    
+    # Sort holdings by value descending
+    sorted_holdings = sorted(token_holdings.items(), key=lambda x: x[1][2], reverse=True)
+    
+    # Format table alignment with code block
+    table_lines = []
+    table_lines.append(f"{'Token':<10} {'Amount':<12} {'Value'}")
+    table_lines.append("─" * 35)
+    for mint, (symbol, amount, val) in sorted_holdings[:5]:
+        amt_str = f"{amount:,.2f}"
+        val_str = format_currency(val, currency)
+        table_lines.append(f"{symbol[:8]:<10} {amt_str:<12} {val_str}")
+        
+    lines.append("<pre>" + "\n".join(table_lines) + "</pre>")
+    return "\n".join(lines)
+
 # Export config
 def handle_export(chat_id):
     with state_lock:
@@ -801,7 +1319,9 @@ def handle_import(chat_id, document):
         if not re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", addr):
             continue
         t_type = info.get("type", "user")
-        if t_type not in ("user", "wallet"):
+        if t_type in ("token", "wallet"):
+            t_type = "token"
+        else:
             t_type = "user"
         name = info.get("name", f"{addr[:4]}...{addr[-4:]}")
         
@@ -831,7 +1351,6 @@ def handle_import(chat_id, document):
             state["chats"] = {}
         if chat_id_str not in state["chats"]:
             state["chats"][chat_id_str] = get_default_chat_state()
-            
         state["chats"][chat_id_str]["currency"] = currency
         state["chats"][chat_id_str]["interval"] = interval
         state["chats"][chat_id_str]["tracked"].update(valid_tracked)
@@ -868,7 +1387,7 @@ def format_transaction_group(wallet_name, address, wallet_type, events, currency
                 mint_groups[mint]['token_change'] += details['change']
                 mint_groups[mint]['sol_change'] += sol_change
                 mint_groups[mint]['value_usd'] += value_usd
-
+ 
     messages = []
     
     # Format token mint groups
@@ -885,31 +1404,58 @@ def format_transaction_group(wallet_name, address, wallet_type, events, currency
         val_str = format_currency(val_usd, currency)
         
         # Determine emoji and action
-        if tok_change > 0:
-            emoji = "🟢"
-            action = "bought"
+        if len(events) == 1:
+            tx_type = events[0].get("tx_type", "⚡ Transfer")
+            if "Trade" in tx_type:
+                if tok_change > 0:
+                    emoji = "🟢"
+                    action = "Buy"
+                else:
+                    emoji = "🔴"
+                    action = "Sell"
+            elif "Receive" in tx_type:
+                emoji = "📥"
+                action = "Transfer (Received)"
+            elif "Send" in tx_type:
+                emoji = "📤"
+                action = "Transfer (Sent)"
+            elif "Stake" in tx_type:
+                emoji = "🥩"
+                action = "Stake / Unstake"
+            else:
+                emoji = "⚡"
+                action = "Transfer"
         else:
-            emoji = "🔴"
-            action = "sold"
+            # Grouped summary
+            if tok_change > 0:
+                emoji = "🟢"
+                action = "Accumulated Buy"
+            else:
+                emoji = "🔴"
+                action = "Accumulated Sell"
             
-        solscan_link = f"<a href='https://solscan.io/account/{address}'>Solscan</a>"
+        if wallet_type == "token":
+            mint_addr = get_mint_for_token_account(address)
+            solscan_url = f"https://solscan.io/token/{mint_addr}" if mint_addr else f"https://solscan.io/account/{address}"
+        else:
+            solscan_url = f"https://solscan.io/account/{address}"
+            
+        solscan_link = f"<a href='{solscan_url}'>Solscan</a>"
+        pair_url, mcap_val = get_dex_market_data(mint)
         
         if concise:
-            header = f"{icon} {wallet_name} ({solscan_link})"
+            header = f"{icon} <b>{wallet_name}</b> ({solscan_link})"
             count_str = f"{tx_count} " if tx_count > 1 else ""
-            body = f"{emoji} {count_str}{action}: {abs(tok_change):,.2f} {symbol} ({mint_short}) ({val_str})"
+            body = f"{emoji} {count_str}<b>{action}:</b> {abs(tok_change):,.2f} {symbol} ({mint_short}) ({val_str})"
             
             tx_lines = []
             for sig in sigs[:5]:
-                tx_lines.append(f"Tx: <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
+                tx_lines.append(f"🔗 <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
             if len(sigs) > 5:
                 tx_lines.append(f"(+{len(sigs) - 5} more)")
                 
-            msg = "\n".join([header, body] + tx_lines)
-            messages.append(msg)
+            msg = "\n".join([header, body, ""] + tx_lines)
         else:
-            # Dexscreener and Rugcheck details
-            pair_url, mcap_val = get_dex_market_data(mint)
             report = get_rugcheck_report(mint)
             bundled_val = get_bundled_percentage(report)
             kol_val = get_kol_count(report)
@@ -922,27 +1468,35 @@ def format_transaction_group(wallet_name, address, wallet_type, events, currency
                 symbol_str = symbol
                 
             mcap_str = format_currency(mcap_val, currency) if mcap_val else "N/A"
+            header = f"Scan complete for <b>{wallet_name}</b> - {solscan_link}"
             
-            header = f"Scan complete for {wallet_name} - {solscan_link}"
-            
-            body_lines = []
+            body_lines = [
+                f"{emoji} <b>{action}:</b> {abs(tok_change):,.2f} {symbol_str} ({val_str})",
+                f"🚨 <b>Bundled:</b> {bundled_val:.2f}%",
+                f"🔑 <b>KOLs:</b> {kol_val} | 🐳 <b>Whales:</b> {whale_val}"
+            ]
             if show_market_cap:
-                body_lines.append(f"💰 Market Cap: {mcap_str}")
-            body_lines.append(f"{emoji} {action} {abs(tok_change):,.2f} {symbol_str} ({val_str})")
-            body_lines.append(f"🚨 Bundled: {bundled_val:.2f}%")
-            body_lines.append(f"🔑 KOL Count: {kol_val}")
-            body_lines.append(f"🐳 Whale Count: {whale_val}")
-            
+                body_lines.insert(1, f"💰 <b>Market Cap:</b> {mcap_str}")
+                
             body = "\n".join(body_lines)
             
             tx_lines = []
             for sig in sigs[:5]:
-                tx_lines.append(f"Tx: <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
+                tx_lines.append(f"🔗 <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
             if len(sigs) > 5:
                 tx_lines.append(f"(+{len(sigs) - 5} more)")
                 
-            msg = "\n".join([header, "", body] + tx_lines)
-            messages.append(msg)
+            msg = "\n".join([header, "", body, ""] + tx_lines)
+            
+        buttons = []
+        row = []
+        row.append({"text": "🌐 Solscan", "url": solscan_url})
+        if pair_url:
+            row.append({"text": "📈 Chart", "url": pair_url})
+        buttons.append(row)
+        reply_markup = {"inline_keyboard": buttons}
+        
+        messages.append({"text": msg, "reply_markup": reply_markup})
             
     # Format SOL only events
     if sol_only_events:
@@ -952,40 +1506,69 @@ def format_transaction_group(wallet_name, address, wallet_type, events, currency
         total_val = sum(ev["value_usd"] for ev in sol_only_events)
         val_str = format_currency(total_val, currency)
         
-        emoji = "🟢" if total_sol > 0 else "🔴"
-        action = "received" if total_sol > 0 else "sent"
-        
-        solscan_link = f"<a href='https://solscan.io/account/{address}'>Solscan</a>"
+        # Determine emoji and action
+        if len(sol_only_events) == 1:
+            tx_type = sol_only_events[0].get("tx_type", "⚡ Transfer")
+            if "Receive" in tx_type:
+                emoji = "📥"
+                action = "Received"
+            elif "Send" in tx_type:
+                emoji = "📤"
+                action = "Sent"
+            elif "Stake" in tx_type:
+                emoji = "🥩"
+                action = "Stake / Unstake"
+            else:
+                emoji = "⚡"
+                action = "Transfer"
+        else:
+            emoji = "🟢" if total_sol > 0 else "🔴"
+            action = "received" if total_sol > 0 else "sent"
+            
+        solscan_url = f"https://solscan.io/account/{address}"
+        solscan_link = f"<a href='{solscan_url}'>Solscan</a>"
         
         if concise:
-            header = f"{icon} {wallet_name} ({solscan_link})"
-            count_str = f"{tx_count} " if tx_count > 1 else ""
-            body = f"{emoji} {count_str}{action}: {abs(total_sol):,.4f} SOL (So1111) ({val_str})"
+            header = f"{icon} <b>{wallet_name}</b> ({solscan_link})"
+            body = f"{emoji} <b>{action}:</b> {abs(total_sol):,.4f} SOL ({val_str})"
             
             tx_lines = []
             for sig in sigs[:5]:
-                tx_lines.append(f"Tx: <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
+                tx_lines.append(f"🔗 <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
             if len(sigs) > 5:
                 tx_lines.append(f"(+{len(sigs) - 5} more)")
                 
-            msg = "\n".join([header, body] + tx_lines)
-            messages.append(msg)
+            msg = "\n".join([header, body, ""] + tx_lines)
         else:
-            header = f"Scan complete for {wallet_name} - {solscan_link}"
-            body = f"{emoji} {action} {abs(total_sol):,.4f} SOL ({val_str})"
+            header = f"Scan complete for <b>{wallet_name}</b> - {solscan_link}"
+            body = f"{emoji} <b>{action}:</b> {abs(total_sol):,.4f} SOL ({val_str})"
             
             tx_lines = []
             for sig in sigs[:5]:
-                tx_lines.append(f"Tx: <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
+                tx_lines.append(f"🔗 <a href='https://solscan.io/tx/{sig}'>{sig[:6]}</a>")
             if len(sigs) > 5:
                 tx_lines.append(f"(+{len(sigs) - 5} more)")
                 
-            msg = "\n".join([header, "", body] + tx_lines)
-            messages.append(msg)
+            msg = "\n".join([header, "", body, ""] + tx_lines)
+            
+        pair_url = "https://dexscreener.com/solana/So11111111111111111111111111111111111111112"
+        buttons = []
+        row = []
+        row.append({"text": "🌐 Solscan", "url": solscan_url})
+        row.append({"text": "📈 Chart", "url": pair_url})
+        buttons.append(row)
+        reply_markup = {"inline_keyboard": buttons}
+        
+        messages.append({"text": msg, "reply_markup": reply_markup})
             
     return messages
 
+
 # Alert sender
+# Batch queue for 60s alerts
+batch_queue = {}
+batch_lock = threading.Lock()
+
 def send_transaction_alert(chat_id, event, currency):
     wallet_type = "user"
     show_coin_link = True
@@ -1005,12 +1588,58 @@ def send_transaction_alert(chat_id, event, currency):
         concise=True
     )
     for msg in messages:
-        make_telegram_request("sendMessage", data={
+        with recent_alerts_lock:
+            recent_alerts.append(msg)
+            if len(recent_alerts) > 5:
+                recent_alerts.pop(0)
+        payload = {
             "chat_id": chat_id,
-            "text": msg,
+            "text": msg["text"],
             "parse_mode": "HTML",
             "disable_web_page_preview": True
-        })
+        }
+        if msg.get("reply_markup"):
+            payload["reply_markup"] = msg["reply_markup"]
+        make_telegram_request("sendMessage", data=payload)
+
+def send_batched_alert(chat_id_str, events, currency):
+    # Group events by address
+    addr_groups = {}
+    for ev in events:
+        addr = ev["address"]
+        if addr not in addr_groups:
+            addr_groups[addr] = []
+        addr_groups[addr].append(ev)
+        
+    for addr, ev_list in addr_groups.items():
+        with state_lock:
+            chat_data = state.get("chats", {}).get(chat_id_str, {})
+            addr_info = chat_data.get("tracked", {}).get(addr, {})
+            wallet_type = addr_info.get("type", "user")
+            wallet_name = addr_info.get("name", "Unnamed")
+            show_coin_link = chat_data.get("show_coin_link", True)
+            show_market_cap = chat_data.get("show_market_cap", True)
+            whale_threshold = chat_data.get("whale_threshold", 1.0)
+            
+        messages = format_transaction_group(
+            wallet_name, addr, wallet_type, ev_list, currency,
+            show_coin_link=show_coin_link, show_market_cap=show_market_cap,
+            whale_threshold=whale_threshold, concise=True
+        )
+        for msg in messages:
+            with recent_alerts_lock:
+                recent_alerts.append(msg)
+                if len(recent_alerts) > 5:
+                    recent_alerts.pop(0)
+            payload = {
+                "chat_id": int(chat_id_str),
+                "text": msg["text"],
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True
+            }
+            if msg.get("reply_markup"):
+                payload["reply_markup"] = msg["reply_markup"]
+            make_telegram_request("sendMessage", data=payload)
 
 # Summary sender
 def send_chat_summary(chat_id, chat_data):
@@ -1043,12 +1672,16 @@ def send_chat_summary(chat_id, chat_data):
             concise=True
         )
         for msg in messages:
-            make_telegram_request("sendMessage", data={
+            payload = {
                 "chat_id": chat_id,
-                "text": msg,
+                "text": msg["text"],
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True
-            })
+            }
+            if msg.get("reply_markup"):
+                payload["reply_markup"] = msg["reply_markup"]
+            make_telegram_request("sendMessage", data=payload)
+
 
 def flush_accumulated_txs(chat_id):
     global state
@@ -1092,26 +1725,113 @@ def handle_telegram_message(msg):
         handle_import(chat_id, document)
         return
         
+    # Ensure chat state exists
+    chat_id_str = str(chat_id)
+    with state_lock:
+        if "chats" not in state:
+            state["chats"] = {}
+        if chat_id_str not in state["chats"]:
+            state["chats"][chat_id_str] = get_default_chat_state()
+            save_state_unlocked()
+
     if not text.startswith("/"):
+        lower_text = text.lower()
+        
+        # Check "price [token]"
+        if lower_text.startswith("price "):
+            token_query = text[6:].strip()
+            if token_query:
+                try:
+                    mint = token_query
+                    if mint.upper() == "SOL":
+                        mint = "So11111111111111111111111111111111111111112"
+                    elif mint.upper() == "USDC":
+                        mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+                    elif mint.upper() == "USDT":
+                        mint = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+                        
+                    symbol, price = get_token_metadata(mint)
+                    if price > 0:
+                        send_cleanup_reply(chat_id, f"🪙 <b>{symbol} Price:</b> <code>${price:,.6f} USD</code>")
+                    else:
+                        url = f"https://api.jup.ag/tokens/v2/search?query={token_query}"
+                        r = requests.get(url, timeout=5)
+                        res = r.json()
+                        if res and isinstance(res, list) and len(res) > 0:
+                            data = res[0]
+                            sym = data.get("symbol")
+                            p = float(data.get("usdPrice", 0.0))
+                            send_cleanup_reply(chat_id, f"🪙 <b>{sym} Price:</b> <code>${p:,.6f} USD</code>")
+                        else:
+                            send_cleanup_reply(chat_id, f"❌ Could not find price for token: <b>{token_query}</b>")
+                except Exception as e:
+                    send_cleanup_reply(chat_id, f"❌ Failed to fetch price: {e}")
+            return
+            
+        # Check "add [address]" alias
+        if lower_text.startswith("add "):
+            parts = text.split()
+            if len(parts) >= 2:
+                address = parts[1]
+                custom_name = " ".join(parts[2:]).strip() if len(parts) > 2 else f"{address[:4]}...{address[-4:]}"
+                add_wallet_flow(chat_id, "u", address, custom_name)
+            else:
+                send_cleanup_reply(chat_id, "❌ Usage: <code>add &lt;address&gt; [name]</code>")
+            return
+            
+        # Check if raw input is a Solana Address (Interactive add)
+        if re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", text):
+            addr_type = identify_address(text)
+            if addr_type == "WALLET":
+                markup = {
+                    "inline_keyboard": [
+                        [
+                            {"text": "✅ Yes, Add Wallet", "callback_data": f"confirm_add_u_{text}"},
+                            {"text": "❌ Cancel", "callback_data": "cancel_add"}
+                        ]
+                    ]
+                }
+                send_cleanup_reply(chat_id, f"👛 <b>Detected Wallet Address:</b>\n<code>{text}</code>\n\nAdd this wallet to your watchlist?", reply_markup=markup)
+            elif addr_type == "TOKEN":
+                markup = {
+                    "inline_keyboard": [
+                        [
+                            {"text": "✅ Yes, Add Token Account", "callback_data": f"confirm_add_t_{text}"},
+                            {"text": "❌ Cancel", "callback_data": "cancel_add"}
+                        ]
+                    ]
+                }
+                send_cleanup_reply(chat_id, f"🧿 <b>Detected Token Account:</b>\n<code>{text}</code>\n\nAdd this token account to your watchlist?", reply_markup=markup)
+            else:
+                send_cleanup_reply(chat_id, "❌ I couldn't identify that as a valid Solana wallet or token address on-chain.")
+            return
+            
+        # Check if raw input is a numeric threshold (e.g. 50, $50, 10.5)
+        clean_num = text.replace("$", "").strip()
+        if re.match(r"^\d+(\.\d+)?$", clean_num):
+            try:
+                threshold = float(clean_num)
+                with state_lock:
+                    current_state = safe_read_state_file(state)
+                    if chat_id_str in current_state.get("chats", {}):
+                        current_state["chats"][chat_id_str]["noise_threshold"] = threshold
+                        state = current_state
+                        save_state_unlocked()
+                send_cleanup_reply(chat_id, f"✅ Alert noise threshold updated to: <b>${threshold:,.2f} USD</b>. Transactions below this value will not trigger alerts.")
+            except Exception as e:
+                logger.error(f"Failed to update threshold: {e}")
+            return
         return
         
     parts = text.split()
     command = parts[0].lower().split("@")[0]
     args = parts[1:]
     
-    with state_lock:
-        chat_id_str = str(chat_id)
-        if "chats" not in state:
-            state["chats"] = {}
-        if chat_id_str not in state["chats"]:
-            state["chats"][chat_id_str] = get_default_chat_state()
-            save_state_unlocked()
-            
     if command == "/start":
-        send_help(chat_id)
         with state_lock:
-            state["chats"][str(chat_id)]["active"] = True
+            state["chats"][chat_id_str]["active"] = True
             save_state_unlocked()
+        send_dashboard(chat_id)
             
     elif command == "/stop":
         with state_lock:
@@ -1122,31 +1842,46 @@ def handle_telegram_message(msg):
     elif command in ("/help", "/h"):
         send_help(chat_id)
         
-    elif command == "/add":
-        if len(args) < 2:
-            reply_to(chat_id, "❌ Usage: <code>/add u &lt;address&gt; [CUSTOM NAME]</code> (user) or <code>/add w &lt;address&gt; [CUSTOM NAME]</code> (wallet)")
-            return
-        addr_type = args[0].lower()
-        address = args[1]
-        custom_name = " ".join(args[2:]).strip() if len(args) > 2 else f"{address[:4]}...{address[-4:]}"
+    elif command == "/status":
+        handle_status_command(chat_id)
         
-        if addr_type not in ("u", "w"):
-            reply_to(chat_id, "❌ Invalid type. Use 'u' or 'w'.")
+    elif command == "/last":
+        handle_last_command(chat_id)
+        
+    elif command == "/alert":
+        handle_alert_command(chat_id)
+        
+    elif command == "/add":
+        if len(args) < 1:
+            reply_to(chat_id, "❌ Usage: <code>/add &lt;address&gt; [CUSTOM NAME]</code>")
             return
+        address = args[0]
+        custom_name = " ".join(args[1:]).strip() if len(args) > 1 else f"{address[:4]}...{address[-4:]}"
+        
         if not re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", address):
             reply_to(chat_id, "❌ Invalid Solana address base58 format.")
             return
             
+        detected_type = identify_address(address)
+        if detected_type == "OTHER_PROGRAM":
+            reply_to(chat_id, f"❌ Error: <code>{address[:8]}...</code> is owned by a program contract and cannot be tracked.")
+            return
+            
+        addr_type = "user" if detected_type == "WALLET" else "token"
+        
         owner_addr = None
-        if addr_type == "w":
-            reply_to(chat_id, "⏳ Resolving token account owner address...")
+        token_mint = None
+        if addr_type == "token":
+            reply_to(chat_id, "⏳ Resolving token account details on-chain...")
             try:
                 res = solana_client._call("getAccountInfo", [address, {"encoding": "jsonParsed"}])
                 if res and res.get("value"):
-                    parsed_data = res["value"].get("data", {})
+                    val = res["value"]
+                    parsed_data = val.get("data", {})
                     if isinstance(parsed_data, dict) and parsed_data.get("parsed"):
                         info_node = parsed_data["parsed"].get("info", {})
                         owner_addr = info_node.get("owner")
+                        token_mint = info_node.get("mint")
             except Exception as e:
                 logger.warning(f"Failed to resolve owner for token account {address}: {e}")
                 
@@ -1156,11 +1891,13 @@ def handle_telegram_message(msg):
         
         with state_lock:
             tracked_entry = {
-                "type": "user" if addr_type == "u" else "wallet",
+                "type": addr_type,
                 "name": custom_name
             }
             if owner_addr:
                 tracked_entry["owner"] = owner_addr
+            if token_mint:
+                tracked_entry["mint"] = token_mint
                 
             state["chats"][str(chat_id)]["tracked"][address] = tracked_entry
             
@@ -1170,8 +1907,11 @@ def handle_telegram_message(msg):
                 state["global_last_signatures"][address] = last_sig
             save_state_unlocked()
             
-        type_lbl = "User Wallet" if addr_type == "u" else "Specific Token Account"
-        extra_info = f"\nOwner: <code>{owner_addr}</code>" if owner_addr else ""
+        type_lbl = "User Wallet" if addr_type == "user" else "Specific Token Account"
+        extra_info = ""
+        if addr_type == "token":
+            extra_info += f"\nOwner: <code>{owner_addr}</code>" if owner_addr else ""
+            extra_info += f"\nMint: <code>{token_mint}</code>" if token_mint else ""
         reply_to(chat_id, f"✅ Tracking added for {type_lbl}:\n<code>{address}</code>{extra_info}\nName: <code>{custom_name}</code>")
         
     elif command == "/remove":
@@ -1283,7 +2023,12 @@ def handle_telegram_message(msg):
         reply_to(chat_id, "⏳ Loading balances from network...")
         try:
             bal_str = format_balance(chat_id)
-            reply_to(chat_id, bal_str)
+            markup = {
+                "inline_keyboard": [
+                    [{"text": "🔄 Refresh Balance", "callback_data": "refresh_balance"}]
+                ]
+            }
+            reply_to(chat_id, bal_str, reply_markup=markup)
         except Exception as e:
             logger.error(f"Balance check failed: {e}")
             reply_to(chat_id, "❌ Failed to fetch wallet balances.")
@@ -1307,7 +2052,7 @@ def handle_telegram_message(msg):
         if not args:
             with state_lock:
                 intv = state["chats"][str(chat_id)].get("interval", 1)
-            reply_to(chat_id, f"⏱️ Current interval: <b>{intv} mins</b>")
+            reply_to(chat_id, f"⏱️ Current interval: <b>{format_duration(intv)}</b>")
             return
         try:
             intv = int(args[0])
@@ -1327,41 +2072,149 @@ def handle_telegram_message(msg):
         if intv == 1:
             reply_to(chat_id, "⏱️ Interval set to 1 min. Realtime alerts activated.")
         else:
-            reply_to(chat_id, f"⏱️ Interval set to {intv} minutes. Accumulating logs.")
+            reply_to(chat_id, f"⏱️ Interval set to <b>{format_duration(intv)}</b>. Accumulating logs.")
             
-    elif command == "/status":
-        reply_to(chat_id, "⏳ Generating status report and scanning security metrics...")
-        try:
-            report_text = format_status_report(chat_id)
-            reply_to(chat_id, report_text)
-        except Exception as e:
-            logger.error(f"Status report failed: {e}")
-            reply_to(chat_id, "❌ Failed to generate status report.")
-            
-    elif command == "/sinterval":
-        if not args:
-            with state_lock:
-                s_intv = state["chats"][str(chat_id)].get("status_interval", 5)
-            reply_to(chat_id, f"ℹ️ Current status notification interval is set to <b>{s_intv}</b> minutes.")
-            return
-        try:
-            val = int(args[0])
-            if val < 1:
-                raise ValueError()
-        except ValueError:
-            reply_to(chat_id, "❌ Status interval must be a positive integer (at least 1 minute).")
-            return
-        with state_lock:
-            state["chats"][str(chat_id)]["status_interval"] = val
-            state["chats"][str(chat_id)]["last_status_time"] = time.time()
-            save_state_unlocked()
-        reply_to(chat_id, f"✅ Status notification interval updated to <b>{val}</b> minutes.")
-            
-    elif command == "/export":
-        handle_export(chat_id)
-        
+
     else:
         reply_to(chat_id, "❌ Unknown command. Type /help for assistance.")
+
+def read_log_tail():
+    try:
+        # LOG_FILE is defined in tracker.py as 'logs/tracker.log' or similar
+        # Let's inspect where LOG_FILE is defined or default to 'logs/tracker.log'
+        import os
+        log_path = LOG_FILE if 'LOG_FILE' in globals() else 'logs/tracker.log'
+        if not os.path.exists(log_path):
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, 'w') as f:
+                f.write("Log initialized.\n")
+        with open(log_path, "r") as f:
+            lines = f.readlines()
+        return [line.strip() for line in lines]
+    except Exception:
+        return ["No logs available."]
+
+def handle_callback_query(cb):
+    cb_id = cb.get("id")
+    chat = cb.get("message", {}).get("chat", {})
+    chat_id = chat.get("id")
+    data = cb.get("data", "")
+    
+    make_telegram_request("answerCallbackQuery", data={"callback_query_id": cb_id})
+    
+    if data == "refresh_balance":
+        if chat_id:
+            msg_id = cb.get("message", {}).get("message_id")
+            make_telegram_request("editMessageText", data={
+                "chat_id": chat_id,
+                "message_id": msg_id,
+                "text": "⏳ Refreshing balances from network...",
+                "parse_mode": "HTML"
+            })
+            try:
+                bal_str = format_balance(chat_id)
+                markup = {
+                    "inline_keyboard": [
+                        [{"text": "🔄 Refresh Balance", "callback_data": "refresh_balance"}]
+                    ]
+                }
+                make_telegram_request("editMessageText", data={
+                    "chat_id": chat_id,
+                    "message_id": msg_id,
+                    "text": bal_str,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                    "reply_markup": markup
+                })
+            except Exception as e:
+                logger.error(f"Async balance refresh failed: {e}")
+                make_telegram_request("editMessageText", data={
+                    "chat_id": chat_id,
+                    "message_id": msg_id,
+                    "text": "❌ Failed to refresh wallet balances.",
+                    "parse_mode": "HTML"
+                })
+    elif data == "refresh_logs":
+        if chat_id:
+            raw_lines = read_log_tail()
+            log_lines = raw_lines[-5:]
+            log_text = "📋 <b>Last 5 Log Entries:</b>\n<pre>" + "\n".join(log_lines) + "</pre>"
+            send_cleanup_reply(chat_id, log_text)
+            
+    elif data == "dashboard_settings":
+        if chat_id:
+            with state_lock:
+                chat_data = state.get("chats", {}).get(str(chat_id), {})
+            lines = [
+                "⚙️ <b>Tracker Settings Summary:</b>",
+                f"• Currency: <code>{chat_data.get('currency', 'USD')}</code>",
+                f"• Summary Interval: <code>{format_duration(chat_data.get('interval', 1))}</code>",
+                f"• Status Scan Interval: <code>{format_duration(chat_data.get('status_interval', 5))}</code>",
+                f"• Whale Threshold: <code>{chat_data.get('whale_threshold', 1.0)} SOL</code>",
+                f"• Noise Threshold: <code>{chat_data.get('noise_threshold', 0.0)} USD</code>",
+                f"• Daily Summary: <code>{'Enabled (' + chat_data.get('daily_summary_time', '00:00') + ')' if chat_data.get('daily_summary_enabled') else 'Disabled'}</code>",
+                f"• Alert Mode: <code>{'🔇 Silent' if chat_data.get('silent_alerts') else '🔊 Active'}</code>"
+            ]
+            send_cleanup_reply(chat_id, "\n".join(lines))
+            
+    elif data == "pause_bot":
+        if chat_id:
+            chat_id_str = str(chat_id)
+            with state_lock:
+                current_state = safe_read_state_file(state)
+                if chat_id_str in current_state.get("chats", {}):
+                    current_state["chats"][chat_id_str]["active"] = False
+                    state = current_state
+                    save_state_unlocked()
+            msg_id = cb.get("message", {}).get("message_id")
+            update_dashboard_markup(chat_id, msg_id, active=False)
+            send_cleanup_reply(chat_id, "⏸️ Notifications paused for this chat.")
+            
+    elif data == "resume_bot":
+        if chat_id:
+            chat_id_str = str(chat_id)
+            with state_lock:
+                current_state = safe_read_state_file(state)
+                if chat_id_str in current_state.get("chats", {}):
+                    current_state["chats"][chat_id_str]["active"] = True
+                    state = current_state
+                    save_state_unlocked()
+            msg_id = cb.get("message", {}).get("message_id")
+            update_dashboard_markup(chat_id, msg_id, active=True)
+            send_cleanup_reply(chat_id, "▶️ Notifications resumed for this chat.")
+            
+    elif data.startswith("confirm_add_u_"):
+        address = data[14:]
+        if chat_id:
+            add_wallet_flow(chat_id, "u", address, f"{address[:4]}...{address[-4:]}")
+            msg_id = cb.get("message", {}).get("message_id")
+            try:
+                make_telegram_request("deleteMessage", data={"chat_id": chat_id, "message_id": msg_id})
+            except Exception:
+                pass
+                
+    elif data.startswith("confirm_add_t_"):
+        address = data[14:]
+        if chat_id:
+            add_wallet_flow(chat_id, "token", address, f"{address[:4]}...{address[-4:]}")
+            msg_id = cb.get("message", {}).get("message_id")
+            try:
+                make_telegram_request("deleteMessage", data={"chat_id": chat_id, "message_id": msg_id})
+            except Exception:
+                pass
+                
+    elif data == "cancel_add":
+        if chat_id:
+            msg_id = cb.get("message", {}).get("message_id")
+            try:
+                make_telegram_request("editMessageText", data={
+                    "chat_id": chat_id,
+                    "message_id": msg_id,
+                    "text": "❌ Action cancelled.",
+                    "parse_mode": "HTML"
+                })
+            except Exception:
+                pass
 
 # Bot Loops
 def telegram_bot_loop():
@@ -1379,6 +2232,9 @@ def telegram_bot_loop():
                     if "message" in update:
                         msg = update["message"]
                         threading.Thread(target=handle_telegram_message, args=(msg,), daemon=True).start()
+                    elif "callback_query" in update:
+                        cb = update["callback_query"]
+                        threading.Thread(target=handle_callback_query, args=(cb,), daemon=True).start()
             else:
                 time.sleep(2)
         except Exception as e:
@@ -1468,7 +2324,8 @@ def parse_and_dispatch_transaction(address, tx, sig):
             "token_changes": {},
             "value_usd": 0.0,
             "wallet_name": wallet_name,
-            "address": address
+            "address": address,
+            "tx_type": classify_transaction(sol_change, token_changes, account_keys)
         }
         
         for mint, details in token_changes.items():
@@ -1487,6 +2344,12 @@ def parse_and_dispatch_transaction(address, tx, sig):
                 total_tok_val += abs(tok["change"]) * tok["price_usd"]
             event["value_usd"] = total_tok_val
             
+        # Check noise threshold (Alert threshold)
+        noise_threshold = chat_data.get("noise_threshold", 0.0)
+        if event["value_usd"] < noise_threshold:
+            logger.info(f"Skipping alert for signature {sig}: value ${event['value_usd']:.2f} is below noise threshold ${noise_threshold:.2f}")
+            continue
+
         # Always accumulate transactions in status_txs for the status interval/scans
         with state_lock:
             chat_id_str = str(chat_id)
@@ -1496,7 +2359,10 @@ def parse_and_dispatch_transaction(address, tx, sig):
             
         interval = chat_data.get("interval", 1)
         if interval == 1:
-            send_transaction_alert(chat_id, event, currency)
+            with batch_lock:
+                if chat_id_str not in batch_queue:
+                    batch_queue[chat_id_str] = []
+                batch_queue[chat_id_str].append((time.time(), event, currency))
         else:
             with state_lock:
                 if "accumulated_txs" not in state["chats"][chat_id_str]:
@@ -1588,10 +2454,12 @@ def summary_scheduler_loop():
     global state
     while True:
         try:
+            check_hot_reload()
             load_state()
             now = time.time()
             chats_for_summary = []
             chats_for_status = []
+            chats_for_daily_summary = []
             
             with state_lock:
                 for chat_id, chat_data in state.get("chats", {}).items():
@@ -1617,6 +2485,34 @@ def summary_scheduler_loop():
                     elif now - last_status >= s_interval * 60:
                         chats_for_status.append(chat_id)
                         
+                    # 3. Daily summary check
+                    daily_enabled = chat_data.get("daily_summary_enabled", False)
+                    if daily_enabled:
+                        summary_time_str = chat_data.get("daily_summary_time", "00:00")
+                        try:
+                            sh, sm = map(int, summary_time_str.split(":"))
+                        except Exception:
+                            sh, sm = 0, 0
+                        local_dt = datetime.datetime.fromtimestamp(now)
+                        target_dt = local_dt.replace(hour=sh, minute=sm, second=0, microsecond=0)
+                        last_date = chat_data.get("last_daily_summary_date", "")
+                        today_str = local_dt.strftime("%Y-%m-%d")
+                        if local_dt >= target_dt and last_date != today_str:
+                            chats_for_daily_summary.append(chat_id)
+                        
+            # Process batched alerts
+            with batch_lock:
+                for chat_id_str, queue in list(batch_queue.items()):
+                    if not queue:
+                        continue
+                    first_event_time = queue[0][0]
+                    last_event_time = queue[-1][0]
+                    if (now - first_event_time >= 60) or (now - last_event_time >= 15):
+                        events_to_send = [item[1] for item in queue]
+                        currency = queue[0][2]
+                        batch_queue[chat_id_str] = []
+                        threading.Thread(target=send_batched_alert, args=(chat_id_str, events_to_send, currency), daemon=True).start()
+                        
             # Process scheduled summaries
             for chat_id, chat_data in chats_for_summary:
                 txs_to_send = list(chat_data.get("accumulated_txs", []))
@@ -1641,6 +2537,21 @@ def summary_scheduler_loop():
                     state["chats"][str(chat_id)]["last_summary_time"] = now
                     state["chats"][str(chat_id)]["accumulated_txs"] = remaining_txs
                     save_state_unlocked()
+                    
+            # Process daily portfolio snapshots
+            for chat_id in chats_for_daily_summary:
+                try:
+                    summary_text = format_daily_summary(chat_id)
+                    reply_to(chat_id, summary_text)
+                    with state_lock:
+                        current_state = safe_read_state_file(state)
+                        cid_str = str(chat_id)
+                        if cid_str in current_state.get("chats", {}):
+                            current_state["chats"][cid_str]["last_daily_summary_date"] = datetime.datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+                            state = current_state
+                            save_state_unlocked()
+                except Exception as e:
+                    logger.error(f"Daily summary failed for chat {chat_id}: {e}")
                     
             # Process scheduled status scans
             for chat_id in chats_for_status:
@@ -1674,12 +2585,16 @@ def summary_scheduler_loop():
                                 whale_threshold=whale_threshold, concise=False
                             )
                             for msg in messages:
-                                make_telegram_request("sendMessage", data={
+                                payload = {
                                     "chat_id": chat_id,
-                                    "text": msg,
+                                    "text": msg["text"],
                                     "parse_mode": "HTML",
                                     "disable_web_page_preview": True
-                                })
+                                }
+                                if msg.get("reply_markup"):
+                                    payload["reply_markup"] = msg["reply_markup"]
+                                make_telegram_request("sendMessage", data=payload)
+
                                 
                     # Clear status_txs and update last_status_time
                     with state_lock:
@@ -1718,6 +2633,12 @@ if __name__ == "__main__":
 
     logger.info("Starting Solana Wallet Tracker Bot...")
     load_state()
+    migrate_tracked_json_types()
+    try:
+        register_telegram_commands()
+    except Exception as e:
+        logger.warning(f"Failed to register command list: {e}")
+
     
     t_tg = threading.Thread(target=telegram_bot_loop, daemon=True)
     t_tg.start()

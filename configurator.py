@@ -1,44 +1,39 @@
 import os
 import sys
+import time
 import json
 import re
-import time
 import subprocess
 import threading
 import requests
-import tkinter as tk
-from tkinter import ttk, filedialog
-import gui_styles
-from gui_styles import APP_ICON_BASE64, setup_styles
-from gui_dialogs import MessageBoxWrapper, CustomAddAddressDialog
+import flet as ft
 
-messagebox = None
-
-# Paths
+# Directory and Path Resolutions
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    
 ENV_PATH = os.path.join(BASE_DIR, "secrets", ".env")
 STATE_PATH = os.path.join(BASE_DIR, "secrets", "tracked.json")
 LOG_PATH = os.path.join(BASE_DIR, "logs", "tracker.log")
 
+# Font Sizes mapping
 FONT_SIZES = {
-    "Small": 8,
-    "Medium": 10,
-    "Large": 12
+    "Small": 12,
+    "Medium": 14,
+    "Large": 16
 }
 
+# Translations Dictionary
 TRANSLATIONS = {
     "English": {
         "title": "Solana Telegram Tracker Configurator",
         "success": "Success",
         "error": "Error",
-        "settings_credentials": " Credentials & Preferences ",
-        "wallet_manager": " Wallet Manager ",
-        "live_console": " Live Console & Logs ",
-        "backup_license": " Backup & License ",
-        "app_settings": " App Settings ",
+        "settings_credentials": "Credentials & Preferences",
+        "wallet_manager": "Wallet Manager",
+        "live_console": "Live Console & Logs",
+        "backup_license": "Backup & License",
         "connection_credentials": "Connection Credentials",
         "telegram_token": "Telegram Token:",
         "telegram_chat_id": "Telegram Chat ID:",
@@ -53,8 +48,8 @@ TRANSLATIONS = {
         "whale_threshold": "Whale Threshold (%):",
         "show_coin_link": "Show Coin Link (Dexscreener)",
         "show_market_cap": "Show Market Cap",
-        "auto_start": "Auto-start Tracker Bot on launch (Skips UI clicking & Telegram /start)",
-        "wallet_address_manager": "Wallet Address Manager (Requires Chat ID to be saved)",
+        "auto_start": "Auto-start Tracker Bot on launch",
+        "wallet_address_manager": "Wallet Address Manager",
         "user_wallets": "User Wallets (Tracks All Tokens)",
         "add_wallet": "Add Wallet",
         "copy": "Copy",
@@ -86,7 +81,7 @@ TRANSLATIONS = {
         "success_pref": "Preferences saved successfully.",
         "success_conn": "Connection parameters saved successfully.",
         "success_import": "Configuration successfully imported and merged.",
-        "success_export": "Configuration successfully exported to: ",
+        "success_export": "Configuration successfully exported.",
         "add_user_wallet_success": "Added wallet: {name}",
         "remove_wallet_success": "Removed wallet: {name}",
         "launch_success": "Tracker process launched.",
@@ -97,18 +92,18 @@ TRANSLATIONS = {
         "chat_id_required": "Please save a Telegram Chat ID first.",
         "token_empty": "Telegram Token cannot be empty.",
         "token_warning_title": "Validation Warning",
-        "token_warning_msg": "The Telegram Bot Token format looks unusual.\nFormat is typically digits:chars (e.g. 1234567:ABCabc...).\nAre you sure you want to save it?",
-        "chat_id_numeric": "Telegram Chat ID must be a numeric value.\nGroup Chat IDs typically start with a minus sign (e.g., -100123456789).",
-        "rpc_invalid": "Invalid RPC URL: '{url}'.\nMust start with http:// or https://",
+        "token_warning_msg": "The Telegram Bot Token format looks unusual. Are you sure you want to save it?",
+        "chat_id_numeric": "Telegram Chat ID must be a numeric value.",
+        "rpc_invalid": "Invalid RPC URL. Must start with http:// or https://",
         "summary_interval_pos": "Summary Interval must be a positive integer.",
         "status_interval_pos": "Status Interval must be a positive integer.",
         "whale_threshold_pos": "Whale Threshold must be a positive number.",
         "import_confirm_title": "Confirm Import",
-        "import_confirm_msg": "This will merge/overwrite your current tracked configuration with the backup file.\nAre you sure you want to proceed?",
+        "import_confirm_msg": "This will merge/overwrite your current tracked configuration with the backup file. Proceed?",
         "import_schema_error": "Invalid backup file schema: missing 'chats' object.",
         "wallet_required": "Please select a wallet address to remove.",
         "wallet_confirm_title": "Confirm Removal",
-        "wallet_confirm_msg": "Are you sure you want to remove the tracking configuration for '{name}'?",
+        "wallet_confirm_msg": "Are you sure you want to remove this tracking configuration?",
         "process_error": "Process Error",
         "process_running": "Tracker bot is already running.",
         "execution_error": "Execution Error",
@@ -141,11 +136,10 @@ TRANSLATIONS = {
         "title": "Панель Отслеживания Solana Кошельков",
         "success": "Успех",
         "error": "Ошибка",
-        "settings_credentials": " Настройки и Данные ",
-        "wallet_manager": " Менеджер Кошельков ",
-        "live_console": " Консоль и Логи ",
-        "backup_license": " Бэкап и Лицензия ",
-        "app_settings": " Настройки Интерфейса ",
+        "settings_credentials": "Настройки и Данные",
+        "wallet_manager": "Менеджер Кошельков",
+        "live_console": "Консоль и Логи",
+        "backup_license": "Бэкап и Лицензия",
         "connection_credentials": "Учетные Данные Подключения",
         "telegram_token": "Токен Telegram:",
         "telegram_chat_id": "Chat ID Telegram:",
@@ -193,7 +187,7 @@ TRANSLATIONS = {
         "success_pref": "Настройки успешно сохранены.",
         "success_conn": "Параметры подключения успешно сохранены.",
         "success_import": "Конфигурация успешно импортирована и объединена.",
-        "success_export": "Конфигурация успешно экспортирована в: ",
+        "success_export": "Конфигурация успешно экспортирована.",
         "add_user_wallet_success": "Добавлен кошелек: {name}",
         "remove_wallet_success": "Удален кошелек: {name}",
         "launch_success": "Процесс отслеживания запущен.",
@@ -204,18 +198,18 @@ TRANSLATIONS = {
         "chat_id_required": "Сначала сохраните Telegram Chat ID.",
         "token_empty": "Токен Telegram не может быть пустым.",
         "token_warning_title": "Предупреждение валидации",
-        "token_warning_msg": "Формат токена Telegram бота выглядит необычно.\nОбычно формат: цифры:символы.\nВы уверены, что хотите сохранить?",
-        "chat_id_numeric": "Chat ID Telegram должен быть числовым.\nID групп обычно начинаются с минуса (например, -100123456789).",
-        "rpc_invalid": "Недопустимый RPC URL: '{url}'.\nДолжен начинаться с http:// или https://",
+        "token_warning_msg": "Формат токена Telegram бота выглядит необычно. Сохранить?",
+        "chat_id_numeric": "Chat ID Telegram должен быть числовым.",
+        "rpc_invalid": "Недопустимый RPC URL. Должен начинаться с http:// или https://",
         "summary_interval_pos": "Интервал сводок должен быть положительным целым числом.",
         "status_interval_pos": "Интервал статуса должен быть положительным целым числом.",
         "whale_threshold_pos": "Порог китов должен быть положительным числом.",
         "import_confirm_title": "Подтвердить импорт",
-        "import_confirm_msg": "Это объединит/перезапишет вашу текущую конфигурацию с файлом бэкапа.\nПродолжить?",
+        "import_confirm_msg": "Это объединит/перезапишет вашу текущую конфигурацию с файлом бэкапа. Продолжить?",
         "import_schema_error": "Неверная схема файла бэкапа: отсутствует объект 'chats'.",
         "wallet_required": "Выберите кошелек для удаления.",
         "wallet_confirm_title": "Подтвердить удаление",
-        "wallet_confirm_msg": "Вы уверены, что хотите прекратить отслеживание '{name}'?",
+        "wallet_confirm_msg": "Вы уверены, что хотите прекратить отслеживание кошелька?",
         "process_error": "Ошибка процесса",
         "process_running": "Бот-трекер уже запущен.",
         "execution_error": "Ошибка выполнения",
@@ -248,11 +242,10 @@ TRANSLATIONS = {
         "title": "لوحة تتبع محفظة سولانا",
         "success": "نجاح",
         "error": "خطأ",
-        "settings_credentials": " الإعدادات والاعتمادات ",
-        "wallet_manager": " مدير المحفظة ",
-        "live_console": " وحدة التحكم والسجلات ",
-        "backup_license": " النسخ الاحتياطي والترخيص ",
-        "app_settings": " إعدادات التطبيق ",
+        "settings_credentials": "الإعدادات والاعتمادات",
+        "wallet_manager": "مدير المحفظة",
+        "live_console": "وحدة التحكم والسجلات",
+        "backup_license": "النسخ الاحتياطي والترخيص",
         "connection_credentials": "بيانات الاتصال",
         "telegram_token": "رمز تليجرام البوت:",
         "telegram_chat_id": "معرف دردشة تليجرام:",
@@ -300,7 +293,7 @@ TRANSLATIONS = {
         "success_pref": "تم حفظ التفضيلات بنجاح.",
         "success_conn": "تم حفظ معلمات الاتصال بنجاح.",
         "success_import": "تم استيراد التكوين ودمجه بنجاح.",
-        "success_export": "تم تصدير التكوين بنجاح إلى: ",
+        "success_export": "تم تصدير التكوين بنجاح.",
         "add_user_wallet_success": "تمت إضافة المحفظة: {name}",
         "remove_wallet_success": "تمت إزالة المحفظة: {name}",
         "launch_success": "تم إطلاق عملية التتبع.",
@@ -311,18 +304,18 @@ TRANSLATIONS = {
         "chat_id_required": "يرجى حفظ معرف دردشة تليجرام أولاً.",
         "token_empty": "لا يمكن أن يكون رمز تليجرام فارغًا.",
         "token_warning_title": "تحذير التحقق",
-        "token_warning_msg": "يبدو تنسيق رمز تليجرام البوت غير عادي.\nهل أنت متأكد أنك تريد حفظه؟",
-        "chat_id_numeric": "يجب أن يكون معرف دردشة تليجرام قيمة رقمية.\nتبدأ معرفات المجموعات عادةً بعلامة ناقص.",
-        "rpc_invalid": "رابط RPC غير صالح: '{url}'.\nيجب أن يبدأ بـ http:// أو https://",
+        "token_warning_msg": "يبدو تنسيق رمز تليجرام البوت غير عادي. هل تريد حفظه؟",
+        "chat_id_numeric": "يجب أن يكون معرف دردشة تليجرام قيمة رقمية.",
+        "rpc_invalid": "رابط RPC غير صالح. يجب أن يبدأ بـ http:// أو https://",
         "summary_interval_pos": "يجب أن يكون فاصل الملخص عددًا صحيحًا موجبًا.",
         "status_interval_pos": "يجب أن يكون فاصل الحالة عددًا صحيحًا موجبًا.",
         "whale_threshold_pos": "يجب أن يكون حد الحوت رقمًا موجبًا.",
         "import_confirm_title": "تأكيد الاستيراد",
-        "import_confirm_msg": "سيؤدي هذا إلى دمج/كتابة التكوين الحالي فوقه بملف النسخ الاحتياطي.\nهل تريد المتابعة؟",
+        "import_confirm_msg": "سيؤدي هذا إلى دمج/كتابة التكوين الحالي فوقه بملف النسخ الاحتياطي. هل تريد المتابعة؟",
         "import_schema_error": "مخطط ملف نسخ احتياطي غير صالح: مفقود كائن 'chats'.",
         "wallet_required": "يرجى تحديد عنوان المحفظة لإزالته.",
         "wallet_confirm_title": "تأكيد الإزالة",
-        "wallet_confirm_msg": "هل أنت متأكد أنك تريد إزالة تكوين التتبع لـ '{name}'؟",
+        "wallet_confirm_msg": "هل أنت متأكد أنك تريد إزالة تكوين التتبع؟",
         "process_error": "خطأ في العملية",
         "process_running": "بوت التتبع قيد التشغيل بالفعل.",
         "execution_error": "خطأ في التنفيذ",
@@ -353,602 +346,92 @@ TRANSLATIONS = {
     }
 }
 
-class ConfiguratorApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Solana Telegram Tracker Configurator")
-        self.root.geometry("820x720")
+class FletConfiguratorApp:
+    def __init__(self, page: ft.Page):
+        self.page = page
+        self.page.title = "Solana Telegram Tracker Configurator"
+        self.page.window.width = 980
+        self.page.window.height = 720
+        self.page.window.min_width = 800
+        self.page.window.min_height = 600
+        self.page.theme_mode = ft.ThemeMode.DARK
+        self.page.bgcolor = "#121214"
         
-        # Custom messagebox wrapper
-        global messagebox
-        messagebox = MessageBoxWrapper(self.root, tr=self.tr)
-        
-        # Subprocess tracker
+        # State variables
         self.tracker_process = None
+        self.should_be_running = False
+        self.bot_start_time = None
+        self.cached_balances = {}
+        self.logs_visible = False
         
-        # Load configs & state values
+        # Load env & database state
         self.token, self.chat_id, self.rpc_url, self.auto_start = self.load_env_values()
         self.state = self.load_state_values()
         
-        # Extract UI settings
+        # Kill any orphaned tracker processes still running from previous sessions
+        self.kill_all_tracker_processes()
+        
         self.settings = self.state.setdefault("settings", {
             "language": "English",
             "font_size": "Medium",
-            "theme": "Dark Mode"
+            "theme": "System Sync"
         })
         
-        # Setup styles based on loaded settings
-        font_size_pt = FONT_SIZES.get(self.settings.get("font_size", "Medium"), 10)
-        setup_styles(font_size=font_size_pt, theme=self.settings.get("theme", "Dark Mode"), root=self.root)
+        # Apply theme settings
+        self.apply_theme_settings()
         
-        self.root.configure(bg=gui_styles.BG_MAIN)
-        
-        # Apply Windows Dark Title Bar natively if win32
-        if sys.platform == "win32":
-            import ctypes
-            try:
-                self.root.update_idletasks()
-                hwnd = self.root.winfo_id()
-                is_dark = (self.settings.get("theme", "Dark Mode") == "Dark Mode")
-                rendering = ctypes.c_int(1 if is_dark else 0)
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(rendering), ctypes.sizeof(rendering))
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(rendering), ctypes.sizeof(rendering))
-            except Exception:
-                pass
-        
-        # Create UI
+        # Build UI Structure
         self.build_ui()
         
-        # Process monitor loop
-        self.check_process()
-        self.root.focus_force()
+        # Start Threads
+        self.check_process_loop()
+        self.load_balances_async()
         
-        # Auto-start bot if configured
+        # Auto-start bot on launch
         if self.auto_start == "true":
             if self.chat_id:
                 chat_id_str = str(self.chat_id)
                 if "chats" in self.state and chat_id_str in self.state["chats"]:
                     self.state["chats"][chat_id_str]["active"] = True
                     self.save_state()
-            self.root.after(500, self.start_bot)
+            self.start_bot()
 
     def tr(self, key):
         lang = self.settings.get("language", "English")
         return TRANSLATIONS.get(lang, TRANSLATIONS["English"]).get(key, TRANSLATIONS["English"].get(key, ""))
 
-    def build_ui(self):
+    def apply_theme_settings(self):
+        theme_mode = self.settings.get("theme", "System Sync")
+        if theme_mode == "System Sync":
+            theme_mode = self.detect_linux_theme()
+            
+        if theme_mode == "Light Mode":
+            self.page.theme_mode = ft.ThemeMode.LIGHT
+            self.page.bgcolor = "#f4f4f5"
+        else:
+            self.page.theme_mode = ft.ThemeMode.DARK
+            self.page.bgcolor = "#121214"
+            
+        font_size_pt = FONT_SIZES.get(self.settings.get("font_size", "Medium"), 14)
+        # Apply page-wide default text style
+        self.page.theme = ft.Theme(
+            text_theme=ft.TextTheme(
+                body_medium=ft.TextStyle(size=font_size_pt)
+            )
+        )
+
+    def detect_linux_theme(self):
         try:
-            self.icon_img = tk.PhotoImage(data=APP_ICON_BASE64)
-            self.icon_img_small = self.icon_img.subsample(16, 16)
-            self.root.iconphoto(True, self.icon_img_small, self.icon_img)
+            res = subprocess.run(
+                ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+                capture_output=True, text=True, timeout=1
+            )
+            if "dark" in res.stdout.lower():
+                return "Dark Mode"
         except Exception:
             pass
+        return "Light Mode"
 
-        # Configure min size of root window
-        self.root.minsize(800, 600)
-        
-        # Main Container Frame
-        self.main_container = tk.Frame(self.root, bg=gui_styles.BG_MAIN, padx=15, pady=10)
-        self.main_container.pack(fill=tk.BOTH, expand=True)
-        
-        # Header Title
-        self.title_lbl = ttk.Label(self.main_container, text=self.tr("title"), style="Header.TLabel")
-        self.title_lbl.pack(anchor=tk.W, pady=(0, 10))
-        
-        # Notebook Tab Container
-        self.notebook = ttk.Notebook(self.main_container)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
-        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
-        
-        self.tab_settings = tk.Frame(self.notebook, bg=gui_styles.BG_MAIN, padx=10, pady=10)
-        self.tab_wallets = tk.Frame(self.notebook, bg=gui_styles.BG_MAIN, padx=10, pady=10)
-        self.tab_logs = tk.Frame(self.notebook, bg=gui_styles.BG_MAIN, padx=10, pady=10)
-        self.tab_ui_settings = tk.Frame(self.notebook, bg=gui_styles.BG_MAIN, padx=10, pady=10)
-        self.tab_backup = tk.Frame(self.notebook, bg=gui_styles.BG_MAIN, padx=10, pady=10)
-        
-        self.notebook.add(self.tab_settings, text=" " + self.tr("settings_credentials") + " ")
-        self.notebook.add(self.tab_wallets, text=" " + self.tr("wallet_manager") + " ")
-        self.notebook.add(self.tab_logs, text=" " + self.tr("live_console") + " ")
-        self.notebook.add(self.tab_ui_settings, text=" " + self.tr("app_settings") + " ")
-        self.notebook.add(self.tab_backup, text=" " + self.tr("backup_license") + " ")
-
-        # --- TAB 1: Settings & Credentials ---
-        conn_card = ttk.Frame(self.tab_settings, style="Card.TFrame")
-        conn_card.pack(fill=tk.X, pady=(0, 10))
-        conn_inner = tk.Frame(conn_card, bg=gui_styles.BG_CARD, padx=12, pady=10)
-        conn_inner.pack(fill=tk.X)
-        
-        self.lbl_credentials_title = ttk.Label(conn_inner, text=self.tr("connection_credentials"), style="CardLabel.TLabel")
-        self.lbl_credentials_title.grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=(0, 10))
-        
-        # Telegram Token
-        self.lbl_tg_token = ttk.Label(conn_inner, text=self.tr("telegram_token"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
-        self.lbl_tg_token.grid(row=1, column=0, sticky=tk.W)
-        self.token_var = tk.StringVar(value=self.token)
-        self.token_entry = tk.Entry(conn_inner, textvariable=self.token_var, bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, insertbackground=gui_styles.TEXT_COLOR, show="*", bd=1, relief=tk.SOLID)
-        self.token_entry.grid(row=1, column=1, sticky=tk.EW, padx=10, pady=5)
-        
-        self.show_token_btn = ttk.Button(conn_inner, text=self.tr("show"), width=6, style="Gray.TButton", command=self.toggle_token_visibility)
-        self.show_token_btn.grid(row=1, column=2, sticky=tk.W)
-        
-        # Chat ID
-        self.lbl_chat_id = ttk.Label(conn_inner, text=self.tr("telegram_chat_id"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
-        self.lbl_chat_id.grid(row=2, column=0, sticky=tk.W)
-        self.chat_id_var = tk.StringVar(value=self.chat_id)
-        self.chat_id_entry = tk.Entry(conn_inner, textvariable=self.chat_id_var, bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, insertbackground=gui_styles.TEXT_COLOR, show="*", bd=1, relief=tk.SOLID)
-        self.chat_id_entry.grid(row=2, column=1, sticky=tk.EW, padx=10, pady=5)
-        
-        self.show_chat_id_btn = ttk.Button(conn_inner, text=self.tr("show"), width=6, style="Gray.TButton", command=self.toggle_chat_id_visibility)
-        self.show_chat_id_btn.grid(row=2, column=2, sticky=tk.W)
-        
-        # Chat ID Hint
-        self.chat_id_hint = ttk.Label(conn_inner, text=self.tr("hint_chat_id"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_MUTED, font=("Helvetica", 8))
-        self.chat_id_hint.grid(row=3, column=1, columnspan=2, sticky=tk.W, padx=10, pady=(0, 5))
-        
-        # Solana RPC URL
-        self.lbl_solana_rpc = ttk.Label(conn_inner, text=self.tr("solana_rpc_url"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
-        self.lbl_solana_rpc.grid(row=4, column=0, sticky=tk.W)
-        self.rpc_url_var = tk.StringVar(value=self.rpc_url)
-        self.rpc_url_entry = tk.Entry(conn_inner, textvariable=self.rpc_url_var, bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, insertbackground=gui_styles.TEXT_COLOR, bd=1, relief=tk.SOLID)
-        self.rpc_url_entry.grid(row=4, column=1, columnspan=2, sticky=tk.EW, padx=10, pady=5)
-        
-        # Buttons Frame on Row 5
-        btn_conn_frame = tk.Frame(conn_inner, bg=gui_styles.BG_CARD)
-        btn_conn_frame.grid(row=5, column=1, columnspan=2, sticky=tk.E, pady=(5, 0))
-        
-        self.test_conn_btn = ttk.Button(btn_conn_frame, text=self.tr("test_connections"), style="Gray.TButton", command=self.test_connections)
-        self.test_conn_btn.pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.save_conn_btn = ttk.Button(btn_conn_frame, text=self.tr("save_connection"), style="Blue.TButton", command=self.save_connections)
-        self.save_conn_btn.pack(side=tk.LEFT)
-        
-        conn_inner.columnconfigure(1, weight=1)
- 
-        # Preferences Card
-        pref_card = ttk.Frame(self.tab_settings, style="Card.TFrame")
-        pref_card.pack(fill=tk.X, pady=(10, 0))
-        pref_inner = tk.Frame(pref_card, bg=gui_styles.BG_CARD, padx=12, pady=10)
-        pref_inner.pack(fill=tk.X)
-        
-        self.lbl_pref_title = ttk.Label(pref_inner, text=self.tr("bot_preferences"), style="CardLabel.TLabel")
-        self.lbl_pref_title.grid(row=0, column=0, columnspan=5, sticky=tk.W, pady=(0, 10))
-        
-        # Display Currency
-        self.lbl_default_currency = ttk.Label(pref_inner, text=self.tr("default_currency"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
-        self.lbl_default_currency.grid(row=1, column=0, sticky=tk.W)
-        self.currency_var = tk.StringVar(value=self.get_chat_pref("currency", "USD"))
-        currencies = ["USD", "NIS", "CAD", "EUR", "GBP", "AUD"]
-        self.currency_menu = ttk.Combobox(pref_inner, textvariable=self.currency_var, values=currencies, width=10, state="readonly")
-        self.currency_menu.grid(row=1, column=1, sticky=tk.EW, padx=10, pady=5)
-        
-        # Interval
-        self.lbl_summary_interval = ttk.Label(pref_inner, text=self.tr("summary_interval"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
-        self.lbl_summary_interval.grid(row=1, column=2, sticky=tk.W)
-        self.interval_var = tk.StringVar(value=str(self.get_chat_pref("interval", 1)))
-        intervals = ["1", "5", "15", "30", "60", "120", "240", "480"]
-        self.interval_menu = ttk.Combobox(pref_inner, textvariable=self.interval_var, values=intervals, width=10, state="readonly")
-        self.interval_menu.grid(row=1, column=3, sticky=tk.EW, padx=10, pady=5)
-        
-        # Save Preferences Button
-        self.save_pref_btn = ttk.Button(pref_inner, text=self.tr("save_preferences"), style="Blue.TButton", command=self.save_preferences)
-        self.save_pref_btn.grid(row=1, column=4, rowspan=2, padx=(20, 0), sticky=tk.NS)
-        
-        # Status Interval
-        self.lbl_status_interval = ttk.Label(pref_inner, text=self.tr("status_interval"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
-        self.lbl_status_interval.grid(row=2, column=0, sticky=tk.W)
-        self.status_interval_var = tk.StringVar(value=str(self.get_chat_pref("status_interval", 5)))
-        status_intervals = ["1", "5", "10", "15", "30", "60"]
-        self.status_interval_menu = ttk.Combobox(pref_inner, textvariable=self.status_interval_var, values=status_intervals, width=10, state="readonly")
-        self.status_interval_menu.grid(row=2, column=1, sticky=tk.EW, padx=10, pady=5)
-        
-        # Whale Threshold
-        self.lbl_whale_threshold = ttk.Label(pref_inner, text=self.tr("whale_threshold"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
-        self.lbl_whale_threshold.grid(row=2, column=2, sticky=tk.W)
-        self.whale_threshold_var = tk.StringVar(value=str(self.get_chat_pref("whale_threshold", 1.0)))
-        self.whale_threshold_entry = tk.Entry(pref_inner, textvariable=self.whale_threshold_var, bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, insertbackground=gui_styles.TEXT_COLOR, bd=1, relief=tk.SOLID, width=12)
-        self.whale_threshold_entry.grid(row=2, column=3, sticky=tk.EW, padx=10, pady=5)
-        
-        # Show Coin Link Checkbox
-        self.show_coin_link_var = tk.BooleanVar(value=self.get_chat_pref("show_coin_link", True))
-        self.show_coin_link_check = tk.Checkbutton(
-            pref_inner,
-            text=self.tr("show_coin_link"),
-            variable=self.show_coin_link_var,
-            bg=gui_styles.BG_CARD,
-            fg=gui_styles.TEXT_COLOR,
-            selectcolor=gui_styles.BG_MAIN,
-            activebackground=gui_styles.BG_CARD,
-            activeforeground=gui_styles.TEXT_COLOR,
-            font=("Helvetica", 10),
-            bd=0,
-            highlightthickness=0
-        )
-        self.show_coin_link_check.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
-        
-        # Show Market Cap Checkbox
-        self.show_market_cap_var = tk.BooleanVar(value=self.get_chat_pref("show_market_cap", True))
-        self.show_market_cap_check = tk.Checkbutton(
-            pref_inner,
-            text=self.tr("show_market_cap"),
-            variable=self.show_market_cap_var,
-            bg=gui_styles.BG_CARD,
-            fg=gui_styles.TEXT_COLOR,
-            selectcolor=gui_styles.BG_MAIN,
-            activebackground=gui_styles.BG_CARD,
-            activeforeground=gui_styles.TEXT_COLOR,
-            font=("Helvetica", 10),
-            bd=0,
-            highlightthickness=0
-        )
-        self.show_market_cap_check.grid(row=3, column=2, columnspan=2, sticky=tk.W, pady=(5, 0))
-        
-        # Auto-start Service Checkbox
-        self.auto_start_var = tk.BooleanVar(value=(self.auto_start == "true"))
-        self.auto_start_check = tk.Checkbutton(
-            pref_inner, 
-            text=self.tr("auto_start"), 
-            variable=self.auto_start_var, 
-            bg=gui_styles.BG_CARD, 
-            fg=gui_styles.TEXT_COLOR, 
-            selectcolor=gui_styles.BG_MAIN, 
-            activebackground=gui_styles.BG_CARD, 
-            activeforeground=gui_styles.TEXT_COLOR,
-            font=("Helvetica", 10),
-            bd=0,
-            highlightthickness=0
-        )
-        self.auto_start_check.grid(row=4, column=0, columnspan=4, sticky=tk.W, pady=(5, 0))
-        
-        pref_inner.columnconfigure(1, weight=1)
-        pref_inner.columnconfigure(3, weight=1)
-
-        # --- TAB 2: Wallet Manager ---
-        wallet_card = ttk.Frame(self.tab_wallets, style="Card.TFrame")
-        wallet_card.pack(fill=tk.BOTH, expand=True)
-        wallet_inner = tk.Frame(wallet_card, bg=gui_styles.BG_CARD, padx=12, pady=10)
-        wallet_inner.pack(fill=tk.BOTH, expand=True)
-        
-        self.lbl_wallet_manager = ttk.Label(wallet_inner, text=self.tr("wallet_address_manager"), style="CardLabel.TLabel")
-        self.lbl_wallet_manager.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 10))
-        
-        # Left Panel - User Wallets (u)
-        user_frame = tk.Frame(wallet_inner, bg=gui_styles.BG_CARD)
-        user_frame.grid(row=1, column=0, sticky=tk.NSEW, padx=(0, 10))
-        self.lbl_user_wallets = ttk.Label(user_frame, text=self.tr("user_wallets"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_MUTED)
-        self.lbl_user_wallets.pack(anchor=tk.W, pady=(0, 3))
-        
-        user_list_frame = tk.Frame(user_frame, bg=gui_styles.BG_CARD)
-        user_list_frame.pack(fill=tk.BOTH, expand=True)
-        user_scroll = ttk.Scrollbar(user_list_frame)
-        user_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        self.user_listbox = tk.Listbox(user_list_frame, bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, selectbackground=gui_styles.ACCENT_BLUE, bd=1, relief=tk.SOLID, selectforeground="#ffffff", highlightthickness=0, height=12, yscrollcommand=user_scroll.set)
-        self.user_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        user_scroll.config(command=self.user_listbox.yview)
-        self.user_listbox.bind("<Double-1>", lambda e: self.copy_selected_address(self.user_listbox, self.user_wallets_map))
-        
-        btn_user_frame = tk.Frame(user_frame, bg=gui_styles.BG_CARD, pady=5)
-        btn_user_frame.pack(fill=tk.X)
-        self.btn_add_user_wallet = ttk.Button(btn_user_frame, text=self.tr("add_wallet"), style="Green.TButton", command=self.add_user_wallet)
-        self.btn_add_user_wallet.pack(side=tk.LEFT, padx=(0, 5))
-        self.btn_copy_user_wallet = ttk.Button(btn_user_frame, text=self.tr("copy"), style="Gray.TButton", command=lambda: self.copy_selected_address(self.user_listbox, self.user_wallets_map))
-        self.btn_copy_user_wallet.pack(side=tk.LEFT, padx=(0, 5))
-        self.btn_remove_user_wallet = ttk.Button(btn_user_frame, text=self.tr("remove"), style="Red.TButton", command=self.remove_user_wallet)
-        self.btn_remove_user_wallet.pack(side=tk.LEFT)
-        
-        # Right Panel - Specific Tokens (w)
-        token_frame = tk.Frame(wallet_inner, bg=gui_styles.BG_CARD)
-        token_frame.grid(row=1, column=1, sticky=tk.NSEW, padx=(10, 0))
-        self.lbl_token_accounts = ttk.Label(token_frame, text=self.tr("token_accounts"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_MUTED)
-        self.lbl_token_accounts.pack(anchor=tk.W, pady=(0, 3))
-        
-        token_list_frame = tk.Frame(token_frame, bg=gui_styles.BG_CARD)
-        token_list_frame.pack(fill=tk.BOTH, expand=True)
-        token_scroll = ttk.Scrollbar(token_list_frame)
-        token_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        self.token_listbox = tk.Listbox(token_list_frame, bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, selectbackground=gui_styles.ACCENT_BLUE, bd=1, relief=tk.SOLID, selectforeground="#ffffff", highlightthickness=0, height=12, yscrollcommand=token_scroll.set)
-        self.token_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        token_scroll.config(command=self.token_listbox.yview)
-        self.token_listbox.bind("<Double-1>", lambda e: self.copy_selected_address(self.token_listbox, self.token_wallets_map))
-        
-        btn_token_frame = tk.Frame(token_frame, bg=gui_styles.BG_CARD, pady=5)
-        btn_token_frame.pack(fill=tk.X)
-        self.btn_add_token_wallet = ttk.Button(btn_token_frame, text=self.tr("add_token_account"), style="Green.TButton", command=self.add_token_wallet)
-        self.btn_add_token_wallet.pack(side=tk.LEFT)
-        self.btn_copy_token_wallet = ttk.Button(btn_token_frame, text=self.tr("copy"), style="Gray.TButton", command=lambda: self.copy_selected_address(self.token_listbox, self.token_wallets_map))
-        self.btn_copy_token_wallet.pack(side=tk.LEFT, padx=(5, 5))
-        self.btn_remove_token_wallet = ttk.Button(btn_token_frame, text=self.tr("remove"), style="Red.TButton", command=self.remove_token_wallet)
-        self.btn_remove_token_wallet.pack(side=tk.LEFT)
-        
-        # Status feedback label in Tab 2
-        self.wallet_status_lbl = ttk.Label(wallet_inner, text="", font=("Helvetica", 9), background=gui_styles.BG_CARD, foreground=gui_styles.ACCENT_BLUE)
-        self.wallet_status_lbl.grid(row=2, column=0, columnspan=2, pady=(5, 0))
-        
-        wallet_inner.rowconfigure(1, weight=1)
-        wallet_inner.columnconfigure(0, weight=1)
-        wallet_inner.columnconfigure(1, weight=1)
-        
-        self.update_wallet_lists()
-
-        # --- TAB 3: Live Console & Logs ---
-        console_frame = tk.Frame(self.tab_logs, bg=gui_styles.BG_MAIN)
-        console_frame.pack(fill=tk.X, side=tk.TOP, pady=(0, 10))
-        
-        self.start_btn = ttk.Button(console_frame, text=self.tr("start_bot"), style="Green.TButton", command=self.start_bot)
-        self.start_btn.pack(side=tk.LEFT)
-        
-        self.stop_btn = ttk.Button(console_frame, text=self.tr("stop_bot"), style="Red.TButton", command=self.stop_bot, state=tk.DISABLED)
-        self.stop_btn.pack(side=tk.LEFT, padx=10)
-        
-        self.btn_clear_console = ttk.Button(console_frame, text=self.tr("clear_console"), style="Gray.TButton", command=self.clear_log_display)
-        self.btn_clear_console.pack(side=tk.LEFT)
-        
-        # Filter Dropdown
-        self.log_filter_var = tk.StringVar(value="All")
-        self.log_filter_menu = ttk.Combobox(console_frame, textvariable=self.log_filter_var, values=["All", "Info", "Warning", "Error"], width=10, state="readonly")
-        self.log_filter_menu.pack(side=tk.LEFT, padx=10)
-        self.log_filter_menu.bind("<<ComboboxSelected>>", lambda e: self.refresh_logs())
-        
-        # Auto-scroll Checkbox
-        self.log_autoscroll_var = tk.BooleanVar(value=True)
-        self.log_autoscroll_check = tk.Checkbutton(
-            console_frame,
-            text=self.tr("auto_scroll"),
-            variable=self.log_autoscroll_var,
-            bg=gui_styles.BG_MAIN,
-            fg=gui_styles.TEXT_COLOR,
-            selectcolor=gui_styles.BG_CARD,
-            activebackground=gui_styles.BG_MAIN,
-            activeforeground=gui_styles.TEXT_COLOR,
-            font=("Helvetica", 10),
-            bd=0,
-            highlightthickness=0
-        )
-        self.log_autoscroll_check.pack(side=tk.LEFT)
-        
-        self.btn_exit = ttk.Button(console_frame, text=self.tr("exit"), style="Gray.TButton", command=self.clean_exit)
-        self.btn_exit.pack(side=tk.RIGHT)
-        
-        self.status_lbl = ttk.Label(console_frame, text=self.tr("status_stopped"), font=("Helvetica", 10, "bold"), foreground=gui_styles.ACCENT_RED)
-        self.status_lbl.pack(side=tk.RIGHT, padx=20)
-        
-        log_frame = tk.Frame(self.tab_logs, bg=gui_styles.BG_MAIN)
-        log_frame.pack(fill=tk.BOTH, expand=True)
-        log_scroll = ttk.Scrollbar(log_frame)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        self.log_text = tk.Text(log_frame, bg="#0d0d0f" if self.settings.get("theme", "Dark Mode") == "Dark Mode" else "#f4f4f5", fg="#a9a9b3" if self.settings.get("theme", "Dark Mode") == "Dark Mode" else "#27272a", insertbackground=gui_styles.TEXT_COLOR, state=tk.DISABLED, font=("Consolas", gui_styles.FONT_SIZE - 1 if gui_styles.FONT_SIZE > 8 else 8), bd=1, relief=tk.SOLID, yscrollcommand=log_scroll.set)
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        log_scroll.config(command=self.log_text.yview)
-        
-        # Log coloring tags
-        self.log_text.tag_config("info", foreground="#60a5fa")     # Soft blue
-        self.log_text.tag_config("warning", foreground="#fbbf24")  # Soft yellow
-        self.log_text.tag_config("error", foreground="#f87171")    # Soft red
-        
-        self.logs_visible = False
-
-        # --- TAB 4: App Settings ---
-        ui_card = ttk.Frame(self.tab_ui_settings, style="Card.TFrame")
-        ui_card.pack(fill=tk.BOTH, expand=True)
-        ui_inner = tk.Frame(ui_card, bg=gui_styles.BG_CARD, padx=15, pady=15)
-        ui_inner.pack(fill=tk.BOTH, expand=True)
-        
-        self.lbl_ui_title = ttk.Label(ui_inner, text=self.tr("ui_settings_title"), style="CardLabel.TLabel")
-        self.lbl_ui_title.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 15))
-        
-        # Language Selector
-        self.lbl_lang = ttk.Label(ui_inner, text=self.tr("language"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
-        self.lbl_lang.grid(row=1, column=0, sticky=tk.W, pady=10)
-        self.lang_var = tk.StringVar(value=self.settings.get("language", "English"))
-        self.lang_menu = ttk.Combobox(ui_inner, textvariable=self.lang_var, values=["English", "Russian", "Arabic"], width=15, state="readonly")
-        self.lang_menu.grid(row=1, column=1, sticky=tk.W, padx=15, pady=10)
-        
-        # Font Size Selector
-        self.lbl_font_size = ttk.Label(ui_inner, text=self.tr("font_size"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
-        self.lbl_font_size.grid(row=2, column=0, sticky=tk.W, pady=10)
-        self.font_size_var = tk.StringVar(value=self.settings.get("font_size", "Medium"))
-        self.font_size_menu = ttk.Combobox(ui_inner, textvariable=self.font_size_var, values=["Small", "Medium", "Large"], width=15, state="readonly")
-        self.font_size_menu.grid(row=2, column=1, sticky=tk.W, padx=15, pady=10)
-        
-        # Theme Selector
-        self.lbl_theme = ttk.Label(ui_inner, text=self.tr("theme"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_COLOR)
-        self.lbl_theme.grid(row=3, column=0, sticky=tk.W, pady=10)
-        self.theme_var = tk.StringVar(value=self.settings.get("theme", "Dark Mode"))
-        self.theme_menu = ttk.Combobox(ui_inner, textvariable=self.theme_var, values=["Dark Mode", "Light Mode"], width=15, state="readonly")
-        self.theme_menu.grid(row=3, column=1, sticky=tk.W, padx=15, pady=10)
-        
-        # Save Settings Button
-        self.btn_save_settings = ttk.Button(ui_inner, text=self.tr("save_settings"), style="Blue.TButton", command=self.save_ui_settings)
-        self.btn_save_settings.grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=(20, 0))
-
-        # --- TAB 5: Backup & License ---
-        backup_card = ttk.Frame(self.tab_backup, style="Card.TFrame")
-        backup_card.pack(fill=tk.X, pady=(0, 10))
-        backup_inner = tk.Frame(backup_card, bg=gui_styles.BG_CARD, padx=12, pady=12)
-        backup_inner.pack(fill=tk.X)
-        
-        self.lbl_backup_restore = ttk.Label(backup_inner, text=self.tr("backup_restore"), style="CardLabel.TLabel")
-        self.lbl_backup_restore.pack(anchor=tk.W, pady=(0, 5))
-        self.lbl_backup_desc = ttk.Label(backup_inner, text=self.tr("backup_desc"), background=gui_styles.BG_CARD, foreground=gui_styles.TEXT_MUTED, font=("Helvetica", 9))
-        self.lbl_backup_desc.pack(anchor=tk.W, pady=(0, 15))
-        
-        btn_back_frame = tk.Frame(backup_inner, bg=gui_styles.BG_CARD)
-        btn_back_frame.pack(fill=tk.X, anchor=tk.W)
-        
-        self.btn_export = ttk.Button(btn_back_frame, text=self.tr("export_list"), style="Blue.TButton", command=self.export_config)
-        self.btn_export.pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.btn_import = ttk.Button(btn_back_frame, text=self.tr("import_list"), style="Gray.TButton", command=self.import_config)
-        self.btn_import.pack(side=tk.LEFT)
-        
-        license_card = ttk.Frame(self.tab_backup, style="Card.TFrame")
-        license_card.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-        license_inner = tk.Frame(license_card, bg=gui_styles.BG_CARD, padx=12, pady=12)
-        license_inner.pack(fill=tk.BOTH, expand=True)
-        
-        self.lbl_about_license = ttk.Label(license_inner, text=self.tr("about_license"), style="CardLabel.TLabel")
-        self.lbl_about_license.pack(anchor=tk.W, pady=(0, 5))
-        
-        about_text = (
-            "Solana Telegram Tracker Configurator v1.1.0\n"
-            "An open-source transaction monitoring system for Solana wallets.\n"
-            "Created by Ofir (c) 2026.\n\n"
-            "Licensed under the MIT License:\n\n"
-            "Permission is hereby granted, free of charge, to any person obtaining a copy\n"
-            "of this software and associated documentation files (the \"Software\"), to deal\n"
-            "in the Software without restriction, including without limitation the rights\n"
-            "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n"
-            "copies of the Software, and to permit persons to whom the Software is\n"
-            "furnished to do so, subject to the following conditions:\n\n"
-            "The above copyright notice and this permission notice shall be included in all\n"
-            "copies or substantial portions of the Software."
-        )
-        
-        license_textbox = tk.Text(license_inner, bg="#0d0d0f" if self.settings.get("theme", "Dark Mode") == "Dark Mode" else "#ffffff", fg=gui_styles.TEXT_MUTED, font=("Consolas", 8), wrap=tk.WORD, bd=1, relief=tk.SOLID)
-        license_textbox.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
-        license_textbox.insert(tk.END, about_text)
-        license_textbox.config(state=tk.DISABLED)
-
-    def on_tab_changed(self, event):
-        selected_tab = self.notebook.select()
-        if selected_tab == str(self.tab_logs):
-            if not self.logs_visible:
-                self.logs_visible = True
-                self.refresh_logs()
-        else:
-            self.logs_visible = False
-
-    def save_ui_settings(self):
-        self.settings["language"] = self.lang_var.get()
-        self.settings["font_size"] = self.font_size_var.get()
-        self.settings["theme"] = self.theme_var.get()
-        
-        self.save_state()
-        
-        font_size_pt = FONT_SIZES.get(self.settings["font_size"], 10)
-        setup_styles(font_size=font_size_pt, theme=self.settings["theme"], root=self.root)
-        
-        if sys.platform == "win32":
-            import ctypes
-            try:
-                self.root.update_idletasks()
-                hwnd = self.root.winfo_id()
-                is_dark = (self.settings.get("theme") == "Dark Mode")
-                rendering = ctypes.c_int(1 if is_dark else 0)
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(rendering), ctypes.sizeof(rendering))
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(rendering), ctypes.sizeof(rendering))
-            except Exception:
-                pass
-                
-        self.apply_theme_and_fonts()
-        messagebox.showinfo("Success", "Settings saved and applied successfully!")
-
-    def apply_theme_and_fonts(self):
-        self.root.configure(bg=gui_styles.BG_MAIN)
-        font_size_pt = FONT_SIZES.get(self.settings.get("font_size", "Medium"), 10)
-        normal_font = ("Helvetica", font_size_pt)
-        console_font = ("Consolas", font_size_pt - 1 if font_size_pt > 8 else 8)
-        
-        self.apply_translations()
-        
-        def update_widget(w):
-            widget_class = w.winfo_class()
-            if widget_class == "Frame":
-                curr_bg = w.cget("bg")
-                if curr_bg in ["#121214", "#f4f4f5"]:
-                    w.configure(bg=gui_styles.BG_MAIN)
-                elif curr_bg in ["#1a1a1e", "#ffffff"]:
-                    w.configure(bg=gui_styles.BG_CARD)
-                else:
-                    w.configure(bg=gui_styles.BG_MAIN)
-            elif widget_class == "Listbox":
-                w.configure(bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, selectbackground=gui_styles.ACCENT_BLUE, font=normal_font)
-            elif widget_class == "Entry":
-                w.configure(bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, insertbackground=gui_styles.TEXT_COLOR, font=normal_font)
-            elif widget_class == "Text":
-                if w == self.log_text:
-                    w.configure(bg="#0d0d0f" if self.settings.get("theme") == "Dark Mode" else "#f4f4f5", fg="#a9a9b3" if self.settings.get("theme") == "Dark Mode" else "#27272a", insertbackground=gui_styles.TEXT_COLOR, font=console_font)
-                else:
-                    w.configure(bg="#0d0d0f" if self.settings.get("theme") == "Dark Mode" else "#ffffff", fg=gui_styles.TEXT_MUTED, font=console_font)
-            elif widget_class == "Checkbutton":
-                w.configure(bg=gui_styles.BG_CARD, fg=gui_styles.TEXT_COLOR, selectcolor=gui_styles.BG_MAIN, activebackground=gui_styles.BG_CARD, activeforeground=gui_styles.TEXT_COLOR, font=normal_font)
-            elif widget_class == "Label":
-                curr_bg = w.cget("bg")
-                if curr_bg in ["#1a1a1e", "#ffffff"]:
-                    w.configure(bg=gui_styles.BG_CARD, fg=gui_styles.TEXT_COLOR, font=normal_font)
-                else:
-                    w.configure(bg=gui_styles.BG_MAIN, fg=gui_styles.TEXT_COLOR, font=normal_font)
-            for child in w.winfo_children():
-                update_widget(child)
-        update_widget(self.root)
-
-    def apply_translations(self):
-        self.notebook.tab(self.tab_settings, text=" " + self.tr("settings_credentials") + " ")
-        self.notebook.tab(self.tab_wallets, text=" " + self.tr("wallet_manager") + " ")
-        self.notebook.tab(self.tab_logs, text=" " + self.tr("live_console") + " ")
-        self.notebook.tab(self.tab_ui_settings, text=" " + self.tr("app_settings") + " ")
-        self.notebook.tab(self.tab_backup, text=" " + self.tr("backup_license") + " ")
-        
-        self.title_lbl.config(text=self.tr("title"))
-        self.lbl_credentials_title.config(text=self.tr("connection_credentials"))
-        self.lbl_tg_token.config(text=self.tr("telegram_token"))
-        self.lbl_chat_id.config(text=self.tr("telegram_chat_id"))
-        self.lbl_solana_rpc.config(text=self.tr("solana_rpc_url"))
-        self.test_conn_btn.config(text=self.tr("test_connections"))
-        self.save_conn_btn.config(text=self.tr("save_connection"))
-        self.chat_id_hint.config(text=self.tr("hint_chat_id"))
-        
-        self.lbl_pref_title.config(text=self.tr("bot_preferences"))
-        self.lbl_default_currency.config(text=self.tr("default_currency"))
-        self.lbl_summary_interval.config(text=self.tr("summary_interval"))
-        self.save_pref_btn.config(text=self.tr("save_preferences"))
-        self.lbl_status_interval.config(text=self.tr("status_interval"))
-        self.lbl_whale_threshold.config(text=self.tr("whale_threshold"))
-        self.show_coin_link_check.config(text=self.tr("show_coin_link"))
-        self.show_market_cap_check.config(text=self.tr("show_market_cap"))
-        self.auto_start_check.config(text=self.tr("auto_start"))
-        
-        self.lbl_wallet_manager.config(text=self.tr("wallet_address_manager"))
-        self.lbl_user_wallets.config(text=self.tr("user_wallets"))
-        self.btn_add_user_wallet.config(text=self.tr("add_wallet"))
-        self.btn_copy_user_wallet.config(text=self.tr("copy"))
-        self.btn_remove_user_wallet.config(text=self.tr("remove"))
-        self.lbl_token_accounts.config(text=self.tr("token_accounts"))
-        self.btn_add_token_wallet.config(text=self.tr("add_token_account"))
-        self.btn_copy_token_wallet.config(text=self.tr("copy"))
-        self.btn_remove_token_wallet.config(text=self.tr("remove"))
-        
-        self.start_btn.config(text=self.tr("start_bot"))
-        self.stop_btn.config(text=self.tr("stop_bot"))
-        self.btn_clear_console.config(text=self.tr("clear_console"))
-        self.btn_exit.config(text=self.tr("exit"))
-        
-        self.update_status_label()
-        
-        self.lbl_backup_restore.config(text=self.tr("backup_restore"))
-        self.btn_export.config(text=self.tr("export_list"))
-        self.btn_import.config(text=self.tr("import_list"))
-        self.lbl_about_license.config(text=self.tr("about_license"))
-        
-        self.lbl_ui_title.config(text=self.tr("ui_settings_title"))
-        self.lbl_lang.config(text=self.tr("language"))
-        self.lbl_font_size.config(text=self.tr("font_size"))
-        self.lbl_theme.config(text=self.tr("theme"))
-        self.btn_save_settings.config(text=self.tr("save_settings"))
-        
-        if self.token_entry.cget("show") == "*":
-            self.show_token_btn.config(text=self.tr("show"))
-        else:
-            self.show_token_btn.config(text=self.tr("hide"))
-            
-        if self.chat_id_entry.cget("show") == "*":
-            self.show_chat_id_btn.config(text=self.tr("show"))
-        else:
-            self.show_chat_id_btn.config(text=self.tr("hide"))
-
-    # State Loaders
     def load_env_values(self):
         token = ""
         chat_id = ""
@@ -973,75 +456,736 @@ class ConfiguratorApp:
                                 rpc_url = v
                             elif k == "AUTO_START_BOT":
                                 auto_start = v
-            except Exception as e:
-                print(f"Error loading env: {e}")
+            except Exception:
+                pass
         return token, chat_id, rpc_url, auto_start
+
+    def save_env_values(self):
+        os.makedirs(os.path.dirname(ENV_PATH), exist_ok=True)
+        try:
+            with open(ENV_PATH, "w") as f:
+                f.write(f"TELEGRAM_BOT_TOKEN={self.token}\n")
+                f.write(f"TELEGRAM_CHAT_ID={self.chat_id}\n")
+                f.write(f"SOLANA_RPC_URL={self.rpc_url}\n")
+                f.write(f"AUTO_START_BOT={self.auto_start}\n")
+            return True
+        except Exception as e:
+            self.show_popup("Error", f"Failed to save environment variables: {e}")
+            return False
 
     def load_state_values(self):
         if os.path.exists(STATE_PATH):
-            lock_path = STATE_PATH + ".lock"
-            import time
-            start_time = time.time()
-            while True:
-                try:
-                    os.mkdir(lock_path)
-                    break
-                except FileExistsError:
-                    if time.time() - start_time > 5.0:
-                        try:
-                            os.rmdir(lock_path)
-                        except Exception:
-                            pass
-                    time.sleep(0.1)
             try:
                 with open(STATE_PATH, "r") as f:
                     return json.load(f)
             except Exception:
                 pass
-            finally:
-                try:
-                    os.rmdir(lock_path)
-                except Exception:
-                    pass
         return {"chats": {}, "global_last_signatures": {}}
 
     def save_state(self):
         os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
-        lock_path = STATE_PATH + ".lock"
-        import time
-        start_time = time.time()
-        while True:
-            try:
-                os.mkdir(lock_path)
-                break
-            except FileExistsError:
-                if time.time() - start_time > 5.0:
-                    try:
-                        os.rmdir(lock_path)
-                    except Exception:
-                        pass
-                time.sleep(0.1)
         try:
-            fresh_state = {"chats": {}, "global_last_signatures": {}}
-            if os.path.exists(STATE_PATH):
-                try:
-                    with open(STATE_PATH, "r") as f:
-                        fresh_state = json.load(f)
-                except Exception:
-                    pass
-            fresh_state["chats"] = self.state.get("chats", {})
-            fresh_state["settings"] = self.settings
-            self.state = fresh_state
-            
             with open(STATE_PATH, "w") as f:
                 json.dump(self.state, f, indent=4)
         except Exception as e:
-            messagebox.showerror(self.tr("save_error"), self.tr("failed_save_state").format(error=e))
-        finally:
+            self.show_popup("Error", f"Failed to save tracked.json state: {e}")
+
+    def show_popup(self, title, message):
+        def close_dialog(e):
+            dialog.open = False
+            self.page.update()
+            
+        dialog = ft.AlertDialog(
+            title=ft.Text(title, weight=ft.FontWeight.BOLD),
+            content=ft.Text(message),
+            actions=[ft.TextButton(self.tr("ok"), on_click=close_dialog)],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        self.page.dialog = dialog
+        dialog.open = True
+        self.page.update()
+
+    def build_ui(self):
+        # 1. Left Sidebar Navigation Panel
+        sidebar_color = "#1a1a1e" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff"
+        
+        # Sidebar Header / Brand Logo
+        sidebar_header = ft.Container(
+            content=ft.Row([
+                ft.Icon(ft.Icons.ACCOUNT_BALANCE_WALLET, color="#10b981", size=22),
+                ft.Text("Solana Tracker", size=16, weight=ft.FontWeight.BOLD, color="#e1e1e6" if self.page.theme_mode == ft.ThemeMode.DARK else "#18181b")
+            ], alignment=ft.MainAxisAlignment.CENTER),
+            padding=ft.Padding(0, 30, 0, 30),
+            bgcolor=sidebar_color
+        )
+        
+        # Sidebar Menu Items
+        self.nav_items = {
+            "dashboard": ft.Container(content=ft.Text("📊  Dashboard", weight=ft.FontWeight.BOLD), padding=12, border_radius=8, on_click=lambda e: self.navigate_to("dashboard")),
+            "wallets": ft.Container(content=ft.Text("👛  " + self.tr("wallet_manager"), weight=ft.FontWeight.BOLD), padding=12, border_radius=8, on_click=lambda e: self.navigate_to("wallets")),
+            "settings": ft.Container(content=ft.Text("⚙️  " + self.tr("settings_credentials"), weight=ft.FontWeight.BOLD), padding=12, border_radius=8, on_click=lambda e: self.navigate_to("settings")),
+            "logs": ft.Container(content=ft.Text("📋  " + self.tr("live_console"), weight=ft.FontWeight.BOLD), padding=12, border_radius=8, on_click=lambda e: self.navigate_to("logs")),
+            "backup": ft.Container(content=ft.Text("💾  " + self.tr("backup_license"), weight=ft.FontWeight.BOLD), padding=12, border_radius=8, on_click=lambda e: self.navigate_to("backup")),
+        }
+        
+        menu_column = ft.Column(
+            [self.nav_items[k] for k in self.nav_items],
+            spacing=5
+        )
+        
+        sidebar_footer = ft.Container(
+            content=ft.Text("v1.4.0 • Release", size=10, color="#8d8d99"),
+            alignment=ft.Alignment(0, 0),
+            padding=ft.Padding(0, 20, 0, 20)
+        )
+        
+        self.sidebar = ft.Container(
+            content=ft.Column([
+                sidebar_header,
+                ft.Container(content=menu_column, padding=10),
+                sidebar_footer
+            ]),
+            width=220,
+            bgcolor=sidebar_color,
+            border=ft.Border(right=ft.BorderSide(1, "#29292e"))
+        )
+        
+        # 2. Page Content Containers
+        self.page_views = {
+            "dashboard": self.build_dashboard_view(),
+            "wallets": self.build_wallets_view(),
+            "settings": self.build_settings_view(),
+            "logs": self.build_logs_view(),
+            "backup": self.build_backup_view(),
+        }
+        
+        self.active_title = ft.Text("Dashboard Overview", size=20, weight=ft.FontWeight.BOLD, color="#10b981")
+        self.content_area = ft.Container(
+            content=self.page_views["dashboard"],
+            expand=True,
+            padding=20,
+        )
+        
+        right_panel = ft.Column([
+            ft.Container(content=self.active_title, padding=ft.Padding(0, 0, 0, 15)),
+            self.content_area
+        ], expand=True)
+        
+        # Root layout structure
+        self.page.add(
+            ft.Row([
+                self.sidebar,
+                right_panel
+            ], expand=True, spacing=0, vertical_alignment="stretch")
+        )
+        
+        # Default Highlight
+        self.navigate_to("dashboard")
+
+    def navigate_to(self, target_name):
+        self.logs_visible = (target_name == "logs")
+        
+        # Clean highlight states
+        for name, item in self.nav_items.items():
+            if name == target_name:
+                item.bgcolor = "#1c1c1f" if self.page.theme_mode == ft.ThemeMode.DARK else "#e4e4e7"
+                item.content.color = "#10b981"
+            else:
+                item.bgcolor = "transparent"
+                item.content.color = "#8d8d99"
+                
+        # Switch Active views
+        self.content_area.content = self.page_views[target_name]
+        
+        title_map = {
+            "dashboard": "Dashboard Overview",
+            "wallets": "Tracked Wallets & Token Accounts",
+            "settings": "Settings & Credentials",
+            "logs": "Live Console Logs Feed",
+            "backup": "Backup & System Settings"
+        }
+        self.active_title.value = title_map[target_name]
+        
+        # Update metric counts dynamically
+        self.update_metrics_values()
+        
+        self.page.update()
+
+    def update_metrics_values(self):
+        w_count = 0
+        t_count = 0
+        if self.chat_id:
+            chat_data = self.state.get("chats", {}).get(str(self.chat_id), {})
+            tracked = chat_data.get("tracked", {})
+            for addr, info in tracked.items():
+                if info.get("type") == "token":
+                    t_count += 1
+                else:
+                    w_count += 1
+                    
+        if hasattr(self, "val_wallets"):
+            self.val_wallets.value = str(w_count)
+        if hasattr(self, "val_tokens"):
+            self.val_tokens.value = str(t_count)
+
+    # PAGE VIEWS GENERATION
+    def build_dashboard_view(self):
+        card_bg = "#1a1a1e" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff"
+        text_color = "#e1e1e6" if self.page.theme_mode == ft.ThemeMode.DARK else "#18181b"
+        
+        # KPI 1: Wallets
+        self.val_wallets = ft.Text("0", size=24, weight=ft.FontWeight.BOLD, color="#10b981")
+        kpi_wallets = ft.Container(
+            content=ft.Column([
+                ft.Text("Total Wallets Tracked", color="#8d8d99", size=12),
+                self.val_wallets
+            ], spacing=5),
+            bgcolor=card_bg, padding=15, border_radius=10, expand=True,
+            border=ft.Border.all(width=1, color="#29292e")
+        )
+        
+        # KPI 2: Active Alert Channel
+        self.val_channels = ft.Text("1 Connected", size=24, weight=ft.FontWeight.BOLD, color="#3b82f6")
+        kpi_channels = ft.Container(
+            content=ft.Column([
+                ft.Text("Active Alert Channels", color="#8d8d99", size=12),
+                self.val_channels
+            ], spacing=5),
+            bgcolor=card_bg, padding=15, border_radius=10, expand=True,
+            border=ft.Border.all(width=1, color="#29292e")
+        )
+        
+        # KPI 3: Total SOL Balance
+        self.val_sol = ft.Text("0.00 SOL", size=24, weight=ft.FontWeight.BOLD, color="#e1e1e6")
+        kpi_sol = ft.Container(
+            content=ft.Column([
+                ft.Text("Total Solana Balance", color="#8d8d99", size=12),
+                self.val_sol
+            ], spacing=5),
+            bgcolor=card_bg, padding=15, border_radius=10, expand=True,
+            border=ft.Border.all(width=1, color="#29292e")
+        )
+        
+        # KPI 4: Token watch count
+        self.val_tokens = ft.Text("0", size=24, weight=ft.FontWeight.BOLD, color="#e1e1e6")
+        kpi_tokens = ft.Container(
+            content=ft.Column([
+                ft.Text("Tracked Token Accounts", color="#8d8d99", size=12),
+                self.val_tokens
+            ], spacing=5),
+            bgcolor=card_bg, padding=15, border_radius=10, expand=True,
+            border=ft.Border.all(width=1, color="#29292e")
+        )
+        
+        kpi_row = ft.Row([kpi_wallets, kpi_channels, kpi_sol, kpi_tokens], spacing=10)
+        
+        headers_row = ft.Container(
+            content=ft.Row([
+                ft.Text("#", color="#8d8d99", size=11, weight=ft.FontWeight.BOLD, width=30),
+                ft.Text("", color="#8d8d99", size=11, weight=ft.FontWeight.BOLD, width=40),
+                ft.Text("Type", color="#8d8d99", size=11, weight=ft.FontWeight.BOLD, width=80),
+                ft.Text("Wallet/Token", color="#8d8d99", size=11, weight=ft.FontWeight.BOLD, expand=True),
+                ft.Text("Balance / Mint", color="#8d8d99", size=11, weight=ft.FontWeight.BOLD, width=180),
+                ft.Text("Status", color="#8d8d99", size=11, weight=ft.FontWeight.BOLD, width=100),
+                ft.Text("Actions", color="#8d8d99", size=11, weight=ft.FontWeight.BOLD, width=100, text_align=ft.TextAlign.RIGHT)
+            ]),
+            padding=ft.Padding(10, 0, 10, 0)
+        )
+        
+        # Table List View
+        self.dashboard_list = ft.Column(spacing=5, scroll=ft.ScrollMode.AUTO, expand=True)
+        
+        # Controls Bar
+        controls_row = ft.Container(
+            content=ft.Row([
+                ft.Text("Tracked Watchlist", size=15, weight=ft.FontWeight.BOLD, color=text_color),
+                ft.Row([
+                    ft.ElevatedButton("+ Add New Wallet", bgcolor="#10b981", color="#ffffff", on_click=self.open_add_dialog),
+                    ft.IconButton(icon=ft.Icons.REFRESH, icon_color="#3b82f6", on_click=lambda e: self.load_balances_async())
+                ])
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            padding=ft.Padding(0, 0, 0, 10)
+        )
+        
+        table_card = ft.Container(
+            content=ft.Column([
+                controls_row,
+                headers_row,
+                ft.Divider(color="#29292e"),
+                self.dashboard_list
+            ], expand=True),
+            bgcolor=card_bg,
+            padding=15,
+            border_radius=12,
+            border=ft.Border.all(width=1, color="#29292e"),
+            expand=True
+        )
+        
+        return ft.Column([kpi_row, table_card], expand=True, spacing=15)
+
+    def refresh_dashboard_table(self):
+        self.dashboard_list.controls.clear()
+        
+        if not self.chat_id:
+            self.page.update()
+            return
+            
+        chat_data = self.state.get("chats", {}).get(str(self.chat_id), {})
+        tracked = chat_data.get("tracked", {})
+        
+        idx = 1
+        for addr, info in tracked.items():
+            name = info.get("name", "Unnamed")
+            addr_type = info.get("type", "user")
+            
+            # 1. Type label
+            type_text = "SOL" if addr_type == "user" else "Token"
+            type_color = "#3b82f6" if addr_type == "user" else "#10b981"
+            
+            # 2. Icon Avatar (Wallet vs Whale vs Token Logo)
+            if addr_type == "user":
+                bal_val = self.cached_balances.get(addr, 0.0)
+                is_whale = bal_val >= 100.0
+                icon_obj = ft.Icons.WAVES if is_whale else ft.Icons.ACCOUNT_BALANCE_WALLET
+                icon_color = "#3b82f6" if is_whale else "#10b981"
+                bg_color = "#1d3557" if is_whale else "#132d24"
+                avatar = ft.Container(
+                    content=ft.Icon(icon_obj, color=icon_color, size=14),
+                    width=24,
+                    height=24,
+                    border_radius=12,
+                    bgcolor=bg_color,
+                    alignment=ft.Alignment(0, 0)
+                )
+            else:
+                mint = info.get("mint", "So11111111111111111111111111111111111111112")
+                logo_url = f"https://token.jup.ag/img/by-mint/{mint}"
+                avatar = ft.Container(
+                    content=ft.Image(
+                        src=logo_url,
+                        width=20,
+                        height=20,
+                        fit="contain",
+                        error_content=ft.Icon(ft.Icons.LOCAL_OFFER, color="#10b981", size=14)
+                    ),
+                    width=24,
+                    height=24,
+                    border_radius=12,
+                    bgcolor="#1c1c1f",
+                    alignment=ft.Alignment(0, 0)
+                )
+                
+            # 3. Address display name
+            addr_display = ft.Column([
+                ft.Text(name, size=13, weight=ft.FontWeight.BOLD),
+                ft.Text(f"{addr[:6]}...{addr[-6:]}", size=11, color="#8d8d99")
+            ], spacing=2, expand=True)
+            
+            # 4. Balances
+            if addr_type == "user":
+                bal_val = self.cached_balances.get(addr, 0.0)
+                bal_text = f"{bal_val:,.2f} SOL"
+            else:
+                mint = info.get("mint") or "N/A"
+                bal_text = f"{mint[:4]}...{mint[-4:]}" if mint != "N/A" else "Token"
+                
+            # 5. Status Pill
+            status_pill = ft.Container(
+                content=ft.Text("Active", color="#34d399", size=10, weight=ft.FontWeight.BOLD),
+                bgcolor="#064e3b",
+                padding=ft.Padding(10, 4, 10, 4),
+                border_radius=12
+            )
+            
+            # 6. Action Buttons Row
+            actions = ft.Row([
+                ft.IconButton(icon=ft.Icons.CONTENT_COPY, icon_color="#8d8d99", icon_size=16, tooltip="Copy Address", on_click=lambda e, a=addr: self.copy_to_clipboard(a)),
+                ft.IconButton(icon=ft.Icons.DELETE, icon_color="#ef4444", icon_size=16, tooltip="Remove Wallet", on_click=lambda e, a=addr: self.delete_wallet_dashboard(a))
+            ], spacing=2, alignment=ft.MainAxisAlignment.END)
+            
+            # Build Row container
+            row_container = ft.Container(
+                content=ft.Row([
+                    ft.Text(f"{idx}.", size=12, color="#8d8d99", width=30),
+                    avatar,
+                    ft.Container(content=ft.Text(type_text, size=12, weight=ft.FontWeight.BOLD, color=type_color), width=80),
+                    addr_display,
+                    ft.Text(bal_text, size=13, width=180),
+                    status_pill,
+                    ft.Container(content=actions, width=100)
+                ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                bgcolor="#111613" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff",
+                padding=10,
+                border_radius=8,
+                border=ft.Border.all(width=1, color="#1e2924" if self.page.theme_mode == ft.ThemeMode.DARK else "#e4e4e7")
+            )
+            self.dashboard_list.controls.append(row_container)
+            idx += 1
+            
+        self.page.update()
+
+    def copy_to_clipboard(self, address):
+        self.page.set_clipboard(address)
+        self.show_popup("Copied", "Address copied to clipboard successfully!")
+
+    def delete_wallet_dashboard(self, address):
+        chat_id_str = str(self.chat_id)
+        if chat_id_str in self.state["chats"] and address in self.state["chats"][chat_id_str]["tracked"]:
+            del self.state["chats"][chat_id_str]["tracked"][address]
+            self.save_state()
+            self.update_wallet_lists()
+            self.refresh_dashboard_table()
+            self.update_metrics_values()
+            self.show_popup("Success", "Address removed from database.")
+
+    def open_add_dialog(self, e):
+        # Dialog Inputs
+        addr_input = ft.TextField(label="Solana Address", border_color="#29292e", bgcolor="#121214", width=350)
+        name_input = ft.TextField(label="Custom Nickname (Optional)", border_color="#29292e", bgcolor="#121214", width=350)
+        
+        def on_add_confirm(e):
+            address = addr_input.value.strip()
+            name = name_input.value.strip() or f"{address[:4]}...{address[-4:]}"
+            
+            if not address or not re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", address):
+                self.show_popup("Error", "Invalid Solana Address format.")
+                return
+                
+            # Classify address on-chain
+            detected_type = self.identify_address_on_chain(address)
+            if detected_type == "OTHER_PROGRAM":
+                self.show_popup("Error", "This contract address cannot be tracked.")
+                return
+            elif detected_type == "INVALID_OR_EMPTY":
+                self.show_popup("Error", "Account info could not be resolved from Solana RPC.")
+                return
+                
+            addr_type = "user" if detected_type == "WALLET" else "token"
+            
+            chat_id_str = str(self.chat_id)
+            if chat_id_str not in self.state["chats"]:
+                self.state["chats"][chat_id_str] = {"tracked": {}}
+                
+            owner_addr = None
+            token_mint = None
+            if addr_type == "token":
+                urls = [u.strip() for u in self.rpc_url.split(",") if u.strip()]
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getAccountInfo",
+                    "params": [address, {"encoding": "jsonParsed"}]
+                }
+                for url in urls:
+                    try:
+                        r = requests.post(url, json=payload, timeout=5)
+                        if r.status_code == 200:
+                            res = r.json()
+                            val = res.get("result", {}).get("value")
+                            if val:
+                                parsed_data = val.get("data", {})
+                                if isinstance(parsed_data, dict) and parsed_data.get("parsed"):
+                                    info_node = parsed_data["parsed"].get("info", {})
+                                    owner_addr = info_node.get("owner")
+                                    token_mint = info_node.get("mint")
+                                    break
+                    except Exception:
+                        pass
+                    
+            tracked_entry = {
+                "type": addr_type,
+                "name": name
+            }
+            if owner_addr:
+                tracked_entry["owner"] = owner_addr
+            if token_mint:
+                tracked_entry["mint"] = token_mint
+                
+            self.state["chats"][chat_id_str]["tracked"][address] = tracked_entry
+            self.save_state()
+            
+            self.update_wallet_lists()
+            self.refresh_dashboard_table()
+            self.update_metrics_values()
+            self.load_balances_async()
+            
+            dialog.open = False
+            self.page.update()
+            
+            type_lbl = "User Wallet" if addr_type == "user" else "Specific Token Account"
+            self.show_popup("Success", f"Successfully added {type_lbl} to watchlist!")
+
+        def close_dialog(e):
+            dialog.open = False
+            self.page.update()
+
+        dialog = ft.AlertDialog(
+            title=ft.Text("Add Tracked Address", weight=ft.FontWeight.BOLD),
+            content=ft.Column([addr_input, name_input], tight=True, spacing=12),
+            actions=[
+                ft.TextButton("Cancel", on_click=close_dialog),
+                ft.ElevatedButton("Add Address", bgcolor="#10b981", color="#ffffff", on_click=on_add_confirm)
+            ],
+            actions_alignment=ft.MainAxisAlignment.END
+        )
+        self.page.dialog = dialog
+        dialog.open = True
+        self.page.update()
+
+    def identify_address_on_chain(self, address_str):
+        if not self.rpc_url:
+            return "UNKNOWN"
+        urls = [u.strip() for u in self.rpc_url.split(",") if u.strip()]
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getAccountInfo",
+            "params": [address_str, {"encoding": "jsonParsed"}]
+        }
+        for url in urls:
             try:
-                os.rmdir(lock_path)
+                r = requests.post(url, json=payload, timeout=5)
+                if r.status_code == 200:
+                    res = r.json()
+                    if "result" in res and res["result"].get("value") is not None:
+                        val = res["result"]["value"]
+                        owner = val.get("owner")
+                        if owner == "11111111111111111111111111111111":
+                            return "WALLET"
+                        elif owner in ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]:
+                            return "TOKEN"
+                        else:
+                            return "OTHER_PROGRAM"
+                    else:
+                        return "INVALID_OR_EMPTY"
+            except Exception:
+                continue
+        return "UNKNOWN"
+
+    def load_balances_async(self):
+        def worker():
+            if not self.chat_id or not self.rpc_url:
+                return
+            chat_data = self.state.get("chats", {}).get(str(self.chat_id), {})
+            tracked = chat_data.get("tracked", {})
+            urls = [u.strip() for u in self.rpc_url.split(",") if u.strip()]
+            
+            total_sol = 0.0
+            temp_balances = {}
+            
+            for addr, info in list(tracked.items()):
+                if info.get("type") == "user":
+                    payload = {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "getBalance",
+                        "params": [addr]
+                    }
+                    for url in urls:
+                        try:
+                            r = requests.post(url, json=payload, timeout=5)
+                            if r.status_code == 200:
+                                res = r.json()
+                                if "result" in res and res["result"].get("value") is not None:
+                                    bal = res["result"]["value"] / 1e9
+                                    total_sol += bal
+                                    temp_balances[addr] = bal
+                                    break
+                        except Exception:
+                            continue
+            
+            self.cached_balances = temp_balances
+            
+            # Safely refresh UI metrics card and rows
+            if hasattr(self, "val_sol"):
+                self.val_sol.value = f"{total_sol:,.2f} SOL"
+            self.refresh_dashboard_table()
+            
+        threading.Thread(target=worker, daemon=True).start()
+
+    def build_wallets_view(self):
+        # We also support direct visual wallet manager lists as back compatibility
+        card_bg = "#1a1a1e" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff"
+        
+        self.user_wallets_col = ft.Column(spacing=5, scroll=ft.ScrollMode.AUTO, expand=True)
+        self.token_accounts_col = ft.Column(spacing=5, scroll=ft.ScrollMode.AUTO, expand=True)
+        
+        user_container = ft.Container(
+            content=ft.Column([
+                ft.Text("User Wallets Watchlist", size=13, color="#8d8d99", weight=ft.FontWeight.BOLD),
+                self.user_wallets_col
+            ], expand=True),
+            bgcolor=card_bg, padding=12, border_radius=8, expand=True,
+            border=ft.Border.all(width=1, color="#29292e")
+        )
+        
+        token_container = ft.Container(
+            content=ft.Column([
+                ft.Text("Token Accounts Watchlist", size=13, color="#8d8d99", weight=ft.FontWeight.BOLD),
+                self.token_accounts_col
+            ], expand=True),
+            bgcolor=card_bg, padding=12, border_radius=8, expand=True,
+            border=ft.Border.all(width=1, color="#29292e")
+        )
+        
+        self.update_wallet_lists()
+        
+        return ft.Row([user_container, token_container], expand=True, spacing=15)
+
+    def update_wallet_lists(self):
+        self.user_wallets_col.controls.clear()
+        self.token_accounts_col.controls.clear()
+        
+        if not self.chat_id:
+            return
+            
+        chat_data = self.state.get("chats", {}).get(str(self.chat_id), {})
+        tracked = chat_data.get("tracked", {})
+        
+        for addr, info in tracked.items():
+            name = info.get("name", "Unnamed")
+            addr_type = info.get("type", "user")
+            
+            row = ft.Container(
+                content=ft.Row([
+                    ft.Text(f"{name} ({addr[:4]}...{addr[-4:]})", size=12, weight=ft.FontWeight.BOLD),
+                    ft.IconButton(icon=ft.Icons.DELETE, icon_color="#ef4444", icon_size=14, on_click=lambda e, a=addr: self.delete_wallet_dashboard(a))
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                padding=6,
+                border_radius=6,
+                bgcolor="#121214" if self.page.theme_mode == ft.ThemeMode.DARK else "#f4f4f5"
+            )
+            
+            if addr_type == "user":
+                self.user_wallets_col.controls.append(row)
+            else:
+                self.token_accounts_col.controls.append(row)
+
+    def build_settings_view(self):
+        card_bg = "#1a1a1e" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff"
+        text_color = "#e1e1e6" if self.page.theme_mode == ft.ThemeMode.DARK else "#18181b"
+        
+        # Credentials Form Fields
+        self.token_field = ft.TextField(label="Telegram Bot Token", password=True, can_reveal_password=True, value=self.token, border_color="#29292e")
+        self.chat_field = ft.TextField(label="Telegram Chat ID", value=self.chat_id, border_color="#29292e")
+        self.rpc_field = ft.TextField(label="Solana RPC URL Preset", value=self.rpc_url, border_color="#29292e")
+        
+        # Connection Save Frame
+        conn_box = ft.Container(
+            content=ft.Column([
+                ft.Row([ft.Icon(ft.Icons.VPN_KEY, color="#3b82f6", size=18), ft.Text("Connection Credentials", size=14, weight=ft.FontWeight.BOLD, color=text_color)], spacing=10),
+                self.token_field,
+                self.chat_field,
+                self.rpc_field,
+                ft.Row([
+                    ft.ElevatedButton("Test Connections", bgcolor="#3e3e42", color=text_color, on_click=self.test_connections),
+                    ft.ElevatedButton("Save Credentials", bgcolor="#3b82f6", color="#ffffff", on_click=self.save_connections)
+                ], alignment=ft.MainAxisAlignment.END)
+            ], spacing=10),
+            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color="#29292e")
+        )
+        
+        # Preferences Form Fields
+        self.currency_field = ft.Dropdown(
+            label="Default Currency",
+            options=[ft.dropdown.Option(c) for c in ["USD", "NIS", "CAD", "EUR", "GBP", "AUD"]],
+            value=self.get_chat_pref("currency", "USD"),
+            border_color="#29292e"
+        )
+        
+        self.interval_field = ft.Dropdown(
+            label="Summary Interval (Minutes)",
+            options=[ft.dropdown.Option(i) for i in ["1", "5", "15", "30", "60", "120", "240", "480"]],
+            value=str(self.get_chat_pref("interval", 1)),
+            border_color="#29292e"
+        )
+        
+        self.status_int_field = ft.Dropdown(
+            label="Status Interval (Minutes)",
+            options=[ft.dropdown.Option(i) for i in ["1", "5", "10", "15", "30", "60"]],
+            value=str(self.get_chat_pref("status_interval", 5)),
+            border_color="#29292e"
+        )
+        
+        self.whale_field = ft.TextField(label="Whale Threshold (% of supply)", value=str(self.get_chat_pref("whale_threshold", 1.0)), border_color="#29292e")
+        self.daily_time_field = ft.TextField(label="Daily Snapshot Time (HH:MM)", value=self.get_chat_pref("daily_summary_time", "00:00"), border_color="#29292e")
+        self.noise_field = ft.TextField(label="Noise Threshold (USD Alert Filter)", value=str(self.get_chat_pref("noise_threshold", 0.0)), border_color="#29292e")
+        
+        self.chk_coin_link = ft.Checkbox(label="Show Coin Links (Dexscreener)", value=self.get_chat_pref("show_coin_link", True))
+        self.chk_market_cap = ft.Checkbox(label="Show Token Market Cap", value=self.get_chat_pref("show_market_cap", True))
+        self.chk_auto_start = ft.Checkbox(label="Auto-start bot service on launch", value=(self.auto_start == "true"))
+        
+        # Preferences Save Frame
+        pref_box = ft.Container(
+            content=ft.Column([
+                ft.Row([ft.Icon(ft.Icons.SETTINGS, color="#3b82f6", size=18), ft.Text("Bot Alert Configurations & Thresholds", size=14, weight=ft.FontWeight.BOLD, color=text_color)], spacing=10),
+                ft.Row([self.currency_field, self.interval_field], spacing=10),
+                ft.Row([self.status_int_field, self.whale_field], spacing=10),
+                ft.Row([self.daily_time_field, self.noise_field], spacing=10),
+                ft.Column([self.chk_coin_link, self.chk_market_cap, self.chk_auto_start], spacing=5),
+                ft.Row([
+                    ft.ElevatedButton("Save Preferences", bgcolor="#3b82f6", color="#ffffff", on_click=self.save_preferences)
+                ], alignment=ft.MainAxisAlignment.END)
+            ], spacing=10),
+            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color="#29292e")
+        )
+        
+        return ft.Column([conn_box, pref_box], spacing=15, scroll=ft.ScrollMode.AUTO, expand=True)
+
+    def test_connections(self, e):
+        tg_token = self.token_field.value.strip()
+        rpc_urls = [u.strip() for u in self.rpc_field.value.strip().split(",") if u.strip()]
+        
+        if not tg_token:
+            self.show_popup("Error", "Telegram Bot Token is required to test connectivity.")
+            return
+            
+        def worker():
+            # Test Telegram API Connection
+            tg_ok = False
+            try:
+                r = requests.get(f"https://api.telegram.org/bot{tg_token}/getMe", timeout=5)
+                tg_ok = (r.status_code == 200)
             except Exception:
                 pass
+                
+            # Test Solana RPC Connection
+            sol_ok = False
+            lat = 999
+            for rpc_url in rpc_urls:
+                try:
+                    t0 = time.time()
+                    payload = {"jsonrpc": "2.0", "id": 1, "method": "getSlot"}
+                    r = requests.post(rpc_url, json=payload, timeout=5)
+                    if r.status_code == 200:
+                        sol_ok = True
+                        lat = int((time.time() - t0) * 1000)
+                        break
+                except Exception:
+                    continue
+                
+            msg = f"Telegram Bot Status: {'[OK] Success' if tg_ok else '[FAILED] Incorrect Token'}\n"
+            msg += f"Solana RPC Status: {'[OK] Connected' if sol_ok else '[FAILED] No Response'}"
+            if sol_ok:
+                msg += f" (Latency: {lat}ms)"
+                
+            self.show_popup("Connection Test Results", msg)
+            
+        threading.Thread(target=worker, daemon=True).start()
+
+    def save_connections(self, e):
+        self.token = self.token_field.value.strip()
+        self.chat_id = self.chat_field.value.strip()
+        self.rpc_url = self.rpc_field.value.strip()
+        
+        if not self.token or not self.chat_id:
+            self.show_popup("Error", "Telegram token and chat ID are required.")
+            return
+            
+        if self.save_env_values():
+            self.show_popup("Success", "Connection credentials saved to secrets/.env successfully!")
+            self.update_wallet_lists()
+            self.refresh_dashboard_table()
 
     def get_chat_pref(self, key, default):
         if not self.chat_id:
@@ -1050,540 +1194,95 @@ class ConfiguratorApp:
         chat_data = self.state.get("chats", {}).get(chat_id_str, {})
         return chat_data.get(key, default)
 
-    def toggle_token_visibility(self):
-        if self.token_entry.cget("show") == "*":
-            self.token_entry.config(show="")
-            self.show_token_btn.config(text=self.tr("hide"))
-        else:
-            self.token_entry.config(show="*")
-            self.show_token_btn.config(text=self.tr("show"))
-
-    def toggle_chat_id_visibility(self):
-        if self.chat_id_entry.cget("show") == "*":
-            self.chat_id_entry.config(show="")
-            self.show_chat_id_btn.config(text=self.tr("hide"))
-        else:
-            self.chat_id_entry.config(show="*")
-            self.show_chat_id_btn.config(text=self.tr("show"))
-
-    def test_connections(self):
-        token = self.token_var.get().replace('\r', '').replace('\n', '').strip()
-        chat_id = self.chat_id_var.get().replace('\r', '').replace('\n', '').strip()
-        rpc_url = self.rpc_url_var.get().replace('\r', '').replace('\n', '').strip()
-        
-        if not token:
-            messagebox.showwarning(self.tr("test_error"), self.tr("token_required"))
-            return
-            
-        self.test_conn_btn.config(state=tk.DISABLED, text=self.tr("testing"))
-        
-        def run_test():
-            results = []
-            success = True
-            
-            # 1. Test Solana RPC URLs with Latency check
-            rpc_urls = [u.strip() for u in rpc_url.split(",")]
-            rpc_ok = False
-            rpc_errors = []
-            latency_ms = None
-            for u in rpc_urls:
-                if not (u.startswith("http://") or u.startswith("https://")):
-                    rpc_errors.append(f"Invalid URL schema: {u}")
-                    continue
-                try:
-                    payload = {"jsonrpc": "2.0", "id": 1, "method": "getSlot"}
-                    start_time = time.time()
-                    response = requests.post(u, json=payload, timeout=5)
-                    elapsed = (time.time() - start_time) * 1000
-                    if response.status_code == 200:
-                        res_json = response.json()
-                        if "result" in res_json:
-                            rpc_ok = True
-                            latency_ms = int(elapsed)
-                            break
-                        else:
-                            rpc_errors.append(f"{u}: Invalid JSON-RPC response")
-                    else:
-                        rpc_errors.append(f"{u}: HTTP {response.status_code}")
-                except Exception as e:
-                    rpc_errors.append(f"{u}: {str(e)}")
-            
-            if rpc_ok:
-                results.append(f"🟢 Solana RPC: Connected successfully ({latency_ms}ms).")
-            else:
-                success = False
-                err_str = "; ".join(rpc_errors)
-                results.append(f"🔴 Solana RPC: Failed ({err_str})")
-                
-            # 2. Test Telegram Bot Token
-            tg_token_ok = False
-            try:
-                response = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5)
-                if response.status_code == 200:
-                    res_json = response.json()
-                    if res_json.get("ok"):
-                        tg_token_ok = True
-                        results.append("🟢 Telegram Bot Token: Valid.")
-                    else:
-                        results.append("🔴 Telegram Bot Token: Invalid response from API.")
-            except Exception as e:
-                results.append(f"🔴 Telegram Bot Token: Failed ({str(e)})")
-                
-            # 3. Test Telegram Chat ID
-            if chat_id:
-                if tg_token_ok:
-                    try:
-                        test_msg = "🔔 *Solana Wallet Tracker Connection Test*\n\nYour bot configuration parameters are verified and working! 🟢"
-                        payload = {"chat_id": chat_id, "text": test_msg, "parse_mode": "Markdown"}
-                        response = requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload, timeout=5)
-                        if response.status_code == 200:
-                            res_json = response.json()
-                            if res_json.get("ok"):
-                                results.append("🟢 Telegram Chat ID: Valid (Test message delivered).")
-                            else:
-                                success = False
-                                results.append(f"🔴 Telegram Chat ID: Failed to send message ({res_json.get('description')})")
-                        else:
-                            success = False
-                            results.append(f"🔴 Telegram Chat ID: HTTP {response.status_code} ({response.text})")
-                    except Exception as e:
-                        success = False
-                        results.append(f"🔴 Telegram Chat ID: Failed ({str(e)})")
-                else:
-                    success = False
-                    results.append("🔴 Telegram Chat ID: Cannot test (invalid bot token).")
-            else:
-                results.append("ℹ️ Telegram Chat ID: Empty (skipped test).")
-                
-            # Invoke callback on main thread
-            self.root.after(0, lambda: self.show_test_results(success, results))
-            
-        threading.Thread(target=run_test, daemon=True).start()
-
-    def show_test_results(self, success, results):
-        self.test_conn_btn.config(state=tk.NORMAL, text=self.tr("test_connections"))
-        message_str = "\n".join(results)
-        if success:
-            messagebox.showinfo(self.tr("conn_test_success"), message_str)
-        else:
-            messagebox.showerror(self.tr("conn_test_failure"), message_str)
-
-    def save_connections(self):
-        token = self.token_var.get().replace('\r', '').replace('\n', '').strip()
-        chat_id = self.chat_id_var.get().replace('\r', '').replace('\n', '').strip()
-        rpc_url = self.rpc_url_var.get().replace('\r', '').replace('\n', '').strip()
-        
-        if not token:
-            messagebox.showwarning(self.tr("validation_error"), self.tr("token_empty"))
-            return
-            
-        # Validate Telegram Bot Token format
-        if not re.match(r"^\d+:[A-Za-z0-9_-]{35,}$", token):
-            if not messagebox.askyesno(self.tr("token_warning_title"), self.tr("token_warning_msg")):
-                return
-                
-        # Validate Telegram Chat ID format
-        if chat_id and not re.match(r"^-?\d+$", chat_id):
-            messagebox.showerror(self.tr("validation_error"), self.tr("chat_id_numeric"))
-            return
-            
-        # Validate Solana RPC URLs
-        urls = [u.strip() for u in rpc_url.split(",")]
-        for url in urls:
-            if not (url.startswith("http://") or url.startswith("https://")):
-                messagebox.showerror(self.tr("validation_error"), self.tr("rpc_invalid").format(url=url))
-                return
-                
-        # Write to env
-        os.makedirs(os.path.dirname(ENV_PATH), exist_ok=True)
-        try:
-            with open(ENV_PATH, "w") as f:
-                f.write(f"TELEGRAM_BOT_TOKEN={token}\n")
-                f.write(f"TELEGRAM_CHAT_ID={chat_id}\n")
-                f.write(f"SOLANA_RPC_URL={rpc_url}\n")
-                f.write(f"AUTO_START_BOT={self.auto_start}\n")
-            
-            # Update internal variables
-            self.token = token
-            self.chat_id = chat_id
-            self.rpc_url = rpc_url
-            
-            # Add/Activate chat config in state
-            if chat_id:
-                chat_id_str = str(chat_id)
-                if "chats" not in self.state:
-                    self.state["chats"] = {}
-                if chat_id_str not in self.state["chats"]:
-                    self.state["chats"][chat_id_str] = {
-                        "active": True,
-                        "currency": "USD",
-                        "interval": 1,
-                        "status_interval": 5,
-                        "whale_threshold": 1.0,
-                        "show_coin_link": True,
-                        "show_market_cap": True,
-                        "last_summary_time": time.time(),
-                        "last_status_time": 0.0,
-                        "status_txs": [],
-                        "tracked": {},
-                        "accumulated_txs": []
-                    }
-                else:
-                    self.state["chats"][chat_id_str]["active"] = True
-                self.save_state()
-            
-            self.update_wallet_lists()
-            messagebox.showinfo(self.tr("success"), self.tr("success_conn"))
-        except Exception as e:
-            messagebox.showerror(self.tr("error"), self.tr("failed_save_env").format(error=e))
-
-    def save_preferences(self):
+    def save_preferences(self, e):
         if not self.chat_id:
-            messagebox.showwarning(self.tr("config_error"), self.tr("chat_id_required"))
-            return
-            
-        curr = self.currency_var.get()
-        
-        try:
-            intv = int(self.interval_var.get())
-            if intv < 1:
-                raise ValueError()
-        except ValueError:
-            messagebox.showerror(self.tr("validation_error"), self.tr("summary_interval_pos"))
-            return
-            
-        try:
-            s_intv = int(self.status_interval_var.get())
-            if s_intv < 1:
-                raise ValueError()
-        except ValueError:
-            messagebox.showerror(self.tr("validation_error"), self.tr("status_interval_pos"))
-            return
-            
-        try:
-            w_thresh = float(self.whale_threshold_var.get())
-            if w_thresh <= 0.0:
-                raise ValueError()
-        except ValueError:
-            messagebox.showerror(self.tr("validation_error"), self.tr("whale_threshold_pos"))
-            return
-            
-        show_link = self.show_coin_link_var.get()
-        show_mcap = self.show_market_cap_var.get()
-        auto_start_val = "true" if self.auto_start_var.get() else "false"
-        
-        self.auto_start = auto_start_val
-        
-        # Write to env
-        try:
-            with open(ENV_PATH, "w") as f:
-                f.write(f"TELEGRAM_BOT_TOKEN={self.token}\n")
-                f.write(f"TELEGRAM_CHAT_ID={self.chat_id}\n")
-                f.write(f"SOLANA_RPC_URL={self.rpc_url}\n")
-                f.write(f"AUTO_START_BOT={self.auto_start}\n")
-        except Exception as e:
-            messagebox.showerror(self.tr("error"), self.tr("failed_save_env").format(error=e))
+            self.show_popup("Error", "Save credentials containing Telegram Chat ID first.")
             return
             
         chat_id_str = str(self.chat_id)
-        if "chats" not in self.state:
-            self.state["chats"] = {}
-        if chat_id_str not in self.state["chats"]:
-            self.state["chats"][chat_id_str] = {
-                "active": True,
-                "currency": "USD",
-                "interval": 1,
-                "status_interval": 5,
-                "whale_threshold": 1.0,
-                "show_coin_link": True,
-                "show_market_cap": True,
-                "last_status_time": 0.0,
-                "status_txs": [],
-                "tracked": {},
-                "accumulated_txs": []
-            }
-        else:
-            self.state["chats"][chat_id_str]["active"] = True
+        chat_data = self.state.setdefault("chats", {}).setdefault(chat_id_str, {})
+        
+        chat_data["currency"] = self.currency_field.value
+        chat_data["interval"] = int(self.interval_field.value)
+        chat_data["status_interval"] = int(self.status_int_field.value)
+        
+        try:
+            chat_data["whale_threshold"] = float(self.whale_field.value.strip())
+        except ValueError:
+            chat_data["whale_threshold"] = 1.0
             
-        self.state["chats"][chat_id_str]["currency"] = curr
-        self.state["chats"][chat_id_str]["interval"] = intv
-        self.state["chats"][chat_id_str]["status_interval"] = s_intv
-        self.state["chats"][chat_id_str]["whale_threshold"] = w_thresh
-        self.state["chats"][chat_id_str]["show_coin_link"] = show_link
-        self.state["chats"][chat_id_str]["show_market_cap"] = show_mcap
+        chat_data["daily_summary_time"] = self.daily_time_field.value.strip()
+        chat_data["daily_summary_enabled"] = (self.daily_time_field.value.strip() != "00:00")
+        
+        try:
+            chat_data["noise_threshold"] = float(self.noise_field.value.strip())
+        except ValueError:
+            chat_data["noise_threshold"] = 0.0
+            
+        chat_data["show_coin_link"] = self.chk_coin_link.value
+        chat_data["show_market_cap"] = self.chk_market_cap.value
+        
+        self.auto_start = "true" if self.chk_auto_start.value else "false"
         
         self.save_state()
-        messagebox.showinfo(self.tr("success"), self.tr("success_pref"))
-
-    def update_wallet_lists(self):
-        self.user_listbox.delete(0, tk.END)
-        self.token_listbox.delete(0, tk.END)
+        self.save_env_values()
         
-        if not self.chat_id:
-            return
-            
-        chat_data = self.state.get("chats", {}).get(str(self.chat_id), {})
-        tracked = chat_data.get("tracked", {})
+        self.show_popup("Success", "Preferences saved and synchronized successfully!")
+
+    def build_logs_view(self):
+        card_bg = "#1a1a1e" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff"
+        text_color = "#e1e1e6" if self.page.theme_mode == ft.ThemeMode.DARK else "#18181b"
         
-        self.user_wallets_map = []
-        self.token_wallets_map = []
+        # Engine Control Buttons
+        self.flet_start_btn = ft.ElevatedButton("Start Bot Service", bgcolor="#10b981", color="#ffffff", on_click=lambda e: self.start_bot())
+        self.flet_stop_btn = ft.ElevatedButton("Stop Bot Service", bgcolor="#ef4444", color="#ffffff", on_click=lambda e: self.stop_bot(), disabled=True)
+        self.flet_status_lbl = ft.Text("● Status: Stopped", color="#ef4444", size=13, weight=ft.FontWeight.BOLD)
         
-        for addr, info in tracked.items():
-            name = info.get("name", "Unnamed")
-            addr_type = info.get("type", "user")
-            
-            display_str = f"{name} ({addr[:4]}...{addr[-4:]})"
-            if addr_type == "user":
-                self.user_listbox.insert(tk.END, display_str)
-                self.user_wallets_map.append(addr)
-            else:
-                self.token_listbox.insert(tk.END, display_str)
-                self.token_wallets_map.append(addr)
-
-    def add_address(self, addr_type):
-        if not self.chat_id:
-            messagebox.showwarning(self.tr("config_error"), self.tr("chat_id_required"))
-            return
-            
-        dialog = CustomAddAddressDialog(self.root, addr_type, tr=self.tr)
-        self.root.wait_window(dialog)
-        
-        if not dialog.result:
-            return
-            
-        address, name = dialog.result
-        
-        chat_id_str = str(self.chat_id)
-        if "chats" not in self.state:
-            self.state["chats"] = {}
-        if chat_id_str not in self.state["chats"]:
-            self.state["chats"][chat_id_str] = {
-                "active": True,
-                "currency": "USD",
-                "interval": 1,
-                "status_interval": 5,
-                "whale_threshold": 1.0,
-                "show_coin_link": True,
-                "show_market_cap": True,
-                "last_status_time": 0.0,
-                "status_txs": [],
-                "tracked": {},
-                "accumulated_txs": []
-            }
-            
-        if "tracked" not in self.state["chats"][chat_id_str]:
-            self.state["chats"][chat_id_str]["tracked"] = {}
-            
-        self.state["chats"][chat_id_str]["tracked"][address] = {
-            "name": name,
-            "type": addr_type
-        }
-        
-        self.save_state()
-        self.update_wallet_lists()
-        self.wallet_status_lbl.config(text=self.tr("add_user_wallet_success").format(name=name), foreground=gui_styles.ACCENT_GREEN)
-
-    def add_user_wallet(self):
-        self.add_address("user")
-
-    def add_token_wallet(self):
-        self.add_address("token")
-
-    def remove_address(self, listbox, wallets_map, label):
-        if not self.chat_id:
-            return
-        idx = listbox.curselection()
-        if not idx:
-            messagebox.showwarning(self.tr("selection_error"), self.tr("wallet_required"))
-            return
-            
-        address = wallets_map[idx[0]]
-        chat_id_str = str(self.chat_id)
-        chat_data = self.state.get("chats", {}).get(chat_id_str, {})
-        name = chat_data.get("tracked", {}).get(address, {}).get("name", "Unnamed")
-        
-        if not messagebox.askyesno(self.tr("wallet_confirm_title"), self.tr("wallet_confirm_msg").format(name=name)):
-            return
-            
-        if chat_id_str in self.state["chats"] and "tracked" in self.state["chats"][chat_id_str]:
-            if address in self.state["chats"][chat_id_str]["tracked"]:
-                del self.state["chats"][chat_id_str]["tracked"][address]
-                self.save_state()
-                
-        self.update_wallet_lists()
-        label.config(text=self.tr("remove_wallet_success").format(name=name), foreground=gui_styles.ACCENT_RED)
-
-    def remove_user_wallet(self):
-        self.remove_address(self.user_listbox, self.user_wallets_map, self.wallet_status_lbl)
-
-    def remove_token_wallet(self):
-        self.remove_address(self.token_listbox, self.token_wallets_map, self.wallet_status_lbl)
-
-    def copy_selected_address(self, listbox, wallets_map):
-        idx = listbox.curselection()
-        if not idx:
-            return
-        address = wallets_map[idx[0]]
-        self.root.clipboard_clear()
-        self.root.clipboard_append(address)
-        self.wallet_status_lbl.config(text=self.tr("copied"), foreground=gui_styles.ACCENT_BLUE)
-
-    def clear_log_display(self):
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.delete("1.0", tk.END)
-        self.log_text.config(state=tk.DISABLED)
-
-    def export_config(self):
-        if not self.chat_id:
-            messagebox.showwarning(self.tr("config_error"), self.tr("chat_id_required"))
-            return
-        chat_id_str = str(self.chat_id)
-        chat_data = self.state.get("chats", {}).get(chat_id_str, {})
-        if not chat_data.get("tracked"):
-            messagebox.showwarning(self.tr("export_warning"), self.tr("no_tracked_addresses"))
-            return
-            
-        export_data = {
-            "chats": {
-                chat_id_str: chat_data
-            },
-            "global_last_signatures": self.state.get("global_last_signatures", {})
-        }
-        
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json"), ("All Files", "*.*")]
+        # Log Text Area
+        self.logs_feed = ft.Text(
+            "Logs streaming panel initialization...\n",
+            font_family="Consolas",
+            size=11,
+            color="#a9a9b3" if self.page.theme_mode == ft.ThemeMode.DARK else "#27272a"
         )
-        if not filename:
-            return
-            
-        try:
-            with open(filename, "w") as f:
-                json.dump(export_data, f, indent=4)
-            messagebox.showinfo(self.tr("success"), self.tr("success_export") + os.path.basename(filename))
-        except Exception as e:
-            messagebox.showerror(self.tr("error"), self.tr("export_failed").format(error=e))
-
-    def import_config(self):
-        filename = filedialog.askopenfilename(
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json"), ("All Files", "*.*")]
+        
+        log_scroll_container = ft.Container(
+            content=ft.Column([self.logs_feed], scroll=ft.ScrollMode.ALWAYS, expand=True),
+            bgcolor="#0d0d0f" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff",
+            padding=15,
+            border_radius=8,
+            border=ft.Border.all(width=1, color="#29292e"),
+            expand=True
         )
-        if not filename:
-            return
-            
-        try:
-            with open(filename, "r") as f:
-                imported_data = json.load(f)
-                
-            if not isinstance(imported_data, dict) or "chats" not in imported_data:
-                messagebox.showerror(self.tr("error"), self.tr("import_schema_error"))
-                return
-                
-            if not messagebox.askyesno(self.tr("import_confirm_title"), self.tr("import_confirm_msg")):
-                return
-                
-            if "chats" in imported_data:
-                for cid, cdata in imported_data["chats"].items():
-                    if cid not in self.state["chats"]:
-                        self.state["chats"][cid] = cdata
-                    else:
-                        if "tracked" in cdata:
-                            if "tracked" not in self.state["chats"][cid]:
-                                self.state["chats"][cid]["tracked"] = {}
-                            self.state["chats"][cid]["tracked"].update(cdata["tracked"])
-                        for k in ("currency", "interval", "active", "status_interval", "whale_threshold", "show_coin_link", "show_market_cap"):
-                            if k in cdata:
-                                self.state["chats"][cid][k] = cdata[k]
-                                
-            if "global_last_signatures" in imported_data:
-                if "global_last_signatures" not in self.state:
-                    self.state["global_last_signatures"] = {}
-                self.state["global_last_signatures"].update(imported_data["global_last_signatures"])
-                
-            self.save_state()
-            self.update_wallet_lists()
-            messagebox.showinfo(self.tr("success"), self.tr("success_import"))
-        except Exception as e:
-            messagebox.showerror(self.tr("error"), self.tr("import_failed").format(error=e))
-
-    def read_log_tail(self):
-        if not os.path.exists(LOG_PATH):
-            return []
-        try:
-            file_size = os.path.getsize(LOG_PATH)
-            chunk_size = 8192
-            with open(LOG_PATH, "rb") as f:
-                if file_size > chunk_size:
-                    f.seek(file_size - chunk_size)
-                    content_bytes = f.read()
-                    content = content_bytes.decode("utf-8", errors="replace")
-                    lines = content.splitlines()
-                    if len(lines) > 1:
-                        return lines[1:]
-                    return lines
-                else:
-                    content_bytes = f.read()
-                    content = content_bytes.decode("utf-8", errors="replace")
-                    return content.splitlines()
-        except Exception as e:
-            return [f"Error reading logs: {e}"]
-
-    def refresh_logs(self):
-        if not self.logs_visible:
-            return
-            
-        filter_level = self.log_filter_var.get().upper()
-        raw_lines = self.read_log_tail()
         
-        filtered_lines = []
-        for line in raw_lines:
-            line = line.strip()
-            if not line:
-                continue
-            
-            level = "ALL"
-            if " - INFO - " in line:
-                level = "INFO"
-            elif " - WARNING - " in line:
-                level = "WARNING"
-            elif " - ERROR - " in line or " - CRITICAL - " in line:
-                level = "ERROR"
-            
-            if filter_level == "ALL" or filter_level == level:
-                filtered_lines.append((line, level.lower() if level != "ALL" else None))
-                
-        tail = filtered_lines[-40:]
+        # Control Buttons Header
+        header_actions = ft.Container(
+            content=ft.Row([
+                ft.Row([self.flet_start_btn, self.flet_stop_btn, self.flet_status_lbl], spacing=10),
+                ft.Row([
+                    ft.ElevatedButton("Clear Logs Display", bgcolor="#3e3e42", color=text_color, on_click=self.clear_logs),
+                    ft.ElevatedButton("Clean Exit App", bgcolor="#3e3e42", color=text_color, on_click=self.clean_exit)
+                ], spacing=10)
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            padding=ft.Padding(0, 0, 0, 10)
+        )
         
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.delete("1.0", tk.END)
-        for line_str, tag in tail:
-            self.log_text.insert(tk.END, line_str + "\n", tag)
-            
-        self.log_text.config(state=tk.DISABLED)
-        if self.log_autoscroll_var.get():
-            self.log_text.see(tk.END)
-        
-        # Schedule next log refresh in 2 seconds
-        if self.logs_visible:
-            self.root.after(2000, self.refresh_logs)
+        return ft.Column([header_actions, log_scroll_container], expand=True)
 
-    # Process Management
     def start_bot(self):
         if self.tracker_process and self.tracker_process.poll() is None:
-            messagebox.showwarning(self.tr("process_error"), self.tr("process_running"))
+            self.show_popup("Error", "Tracker engine bot is already running in background.")
             return
             
         if not self.token:
-            messagebox.showwarning(self.tr("config_error"), self.tr("token_save_first"))
+            self.show_popup("Error", "Bot Token is empty. Fill and save connection credentials first.")
             return
             
+        self.should_be_running = True
         try:
             if getattr(sys, 'frozen', False):
                 exe_name = "tracker.exe" if sys.platform == "win32" else "tracker"
                 tracker_path = os.path.join(BASE_DIR, exe_name)
-                if not os.path.exists(tracker_path):
-                    tracker_path = os.path.join(os.path.dirname(sys.executable), exe_name)
                 self.tracker_process = subprocess.Popen(
                     [tracker_path],
                     cwd=BASE_DIR,
@@ -1598,61 +1297,326 @@ class ConfiguratorApp:
                     stderr=subprocess.DEVNULL
                 )
             self.bot_start_time = time.time()
-            self.pulse_state = True
-            self.start_btn.config(state=tk.DISABLED)
-            self.stop_btn.config(state=tk.NORMAL)
-            self.update_status_label()
-            logger_msg = "Tracker process launched."
-            print(logger_msg)
+            self.flet_start_btn.disabled = True
+            self.flet_stop_btn.disabled = False
+            self.update_status_ticker()
+            self.show_popup("Bot Engine launched", "Tracker Daemon Bot process launched successfully.")
         except Exception as e:
-            messagebox.showerror(self.tr("execution_error"), self.tr("launch_failed").format(error=e))
+            self.show_popup("Error", f"Failed to start tracker: {e}")
+
+    def kill_all_tracker_processes(self):
+        try:
+            if sys.platform == "win32":
+                os.system("taskkill /f /im tracker.exe >nul 2>&1")
+                os.system('wmic process where "commandline like \'%tracker.py%\'" call terminate >nul 2>&1')
+            else:
+                os.system("pkill -f 'python.*tracker.py' > /dev/null 2>&1")
+                os.system("pkill -f 'tracker' > /dev/null 2>&1")
+        except Exception:
+            pass
 
     def stop_bot(self):
+        self.should_be_running = False
         if self.tracker_process and self.tracker_process.poll() is None:
             self.tracker_process.terminate()
             self.tracker_process.wait()
             self.tracker_process = None
             
+        # Clean up any other running tracker processes just in case
+        self.kill_all_tracker_processes()
         self.bot_start_time = None
-        self.start_btn.config(state=tk.NORMAL)
-        self.stop_btn.config(state=tk.DISABLED)
-        self.update_status_label()
+        self.flet_start_btn.disabled = False
+        self.flet_stop_btn.disabled = True
+        self.update_status_ticker()
+        self.show_popup("Bot Stopped", "Tracker Daemon Bot process stopped successfully.")
 
-    def check_process(self):
-        if self.tracker_process:
-            status = self.tracker_process.poll()
-            if status is not None: # Stopped
-                self.tracker_process = None
-                self.bot_start_time = None
-                self.start_btn.config(state=tk.NORMAL)
-                self.stop_btn.config(state=tk.DISABLED)
-        self.update_status_label()
-        self.root.after(1000, self.check_process)
+    def clear_logs(self, e):
+        # Truncate physical file
+        try:
+            with open(LOG_PATH, "w") as f:
+                f.truncate(0)
+        except Exception:
+            pass
+        self.logs_feed.value = "Logs console cleared.\n"
+        self.page.update()
 
-    def update_status_label(self):
+    def clean_exit(self, e=None):
+        self.should_be_running = False
+        if self.tracker_process and self.tracker_process.poll() is None:
+            try:
+                self.tracker_process.terminate()
+                self.tracker_process.wait()
+            except Exception:
+                pass
+        sys.exit(0)
+
+    def check_process_loop(self):
+        def worker():
+            while True:
+                time.sleep(1)
+                
+                # Check subprocess watchdog
+                if self.tracker_process:
+                    status = self.tracker_process.poll()
+                    if status is not None:
+                        self.tracker_process = None
+                        self.bot_start_time = None
+                        self.flet_start_btn.disabled = False
+                        self.flet_stop_btn.disabled = True
+                        if self.should_be_running:
+                            print("Watchdog: Process exited. Auto-restarting...")
+                            self.start_bot()
+                else:
+                    if self.should_be_running:
+                        print("Watchdog: Process not running but should be. Starting...")
+                        self.start_bot()
+                        
+                # Update status labels
+                self.update_status_ticker()
+                
+                # Update logs dynamically
+                if self.logs_visible:
+                    self.stream_logs_feed()
+                    
+        threading.Thread(target=worker, daemon=True).start()
+
+    def update_status_ticker(self):
         if self.tracker_process and self.tracker_process.poll() is None:
             uptime = int(time.time() - (self.bot_start_time or time.time()))
             h = uptime // 3600
             m = (uptime % 3600) // 60
             s = uptime % 60
             uptime_str = f"{h:02d}:{m:02d}:{s:02d}"
+            status_text = f"● Running | Uptime: {uptime_str}"
             
-            if not hasattr(self, "pulse_state"):
-                self.pulse_state = True
-            self.pulse_state = not self.pulse_state
-            dot_color = gui_styles.ACCENT_GREEN if self.pulse_state else ("#059669" if self.settings.get("theme") == "Light Mode" else "#047857")
-            
-            running_text = self.tr("status_running").format(uptime=uptime_str)
-            self.status_lbl.config(text=running_text, foreground=dot_color)
+            self.flet_status_lbl.value = status_text
+            self.flet_status_lbl.color = "#10b981"
+            if hasattr(self, "val_channels"):
+                self.val_channels.value = "Active"
+                self.val_channels.color = "#10b981"
+            if hasattr(self, "dash_status_val"):
+                self.dash_status_val.value = f"Active ({uptime_str})"
+                self.dash_status_val.color = "#10b981"
         else:
-            self.status_lbl.config(text=self.tr("status_stopped"), foreground=gui_styles.ACCENT_RED)
+            self.flet_status_lbl.value = "● Status: Stopped"
+            self.flet_status_lbl.color = "#ef4444"
+            if hasattr(self, "val_channels"):
+                self.val_channels.value = "Stopped"
+                self.val_channels.color = "#ef4444"
+            if hasattr(self, "dash_status_val"):
+                self.dash_status_val.value = "Stopped"
+                self.dash_status_val.color = "#ef4444"
+        self.page.update()
 
-    def clean_exit(self):
-        self.stop_bot()
-        self.root.destroy()
+    def stream_logs_feed(self):
+        if not os.path.exists(LOG_PATH):
+            self.logs_feed.value = "No log file found at logs/tracker.log"
+            self.page.update()
+            return
+            
+        try:
+            with open(LOG_PATH, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            # Get tail 40 lines
+            tail = [line.strip() for line in lines[-40:]]
+            self.logs_feed.value = "\n".join(tail)
+        except Exception as e:
+            self.logs_feed.value = f"Error reading logs: {e}"
+        self.page.update()
+
+    def build_backup_view(self):
+        card_bg = "#1a1a1e" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff"
+        text_color = "#e1e1e6" if self.page.theme_mode == ft.ThemeMode.DARK else "#18181b"
+        
+        # Backup panel buttons
+        backup_box = ft.Container(
+            content=ft.Column([
+                ft.Row([ft.Icon(ft.Icons.BACKUP, color="#3b82f6", size=18), ft.Text("Backup & Restore Data", size=14, weight=ft.FontWeight.BOLD, color=text_color)], spacing=10),
+                ft.Text(self.tr("backup_desc"), size=11, color="#8d8d99"),
+                ft.Row([
+                    ft.ElevatedButton("Export Tracked List", bgcolor="#3b82f6", color="#ffffff", on_click=self.export_config),
+                    ft.ElevatedButton("Import Tracked List", bgcolor="#3e3e42", color=text_color, on_click=self.import_config),
+                ], spacing=10)
+            ], spacing=10),
+            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color="#29292e")
+        )
+        
+        # App Settings Card
+        self.lang_field = ft.Dropdown(
+            label="Language Selection",
+            options=[ft.dropdown.Option(lang) for lang in ["English", "Russian", "Arabic"]],
+            value=self.settings.get("language", "English"),
+            border_color="#29292e"
+        )
+        self.size_field = ft.Dropdown(
+            label="UI Font Size",
+            options=[ft.dropdown.Option(sz) for sz in ["Small", "Medium", "Large"]],
+            value=self.settings.get("font_size", "Medium"),
+            border_color="#29292e"
+        )
+        self.theme_field = ft.Dropdown(
+            label="UI Theme Mode",
+            options=[ft.dropdown.Option(th) for th in ["Dark Mode", "Light Mode", "System Sync"]],
+            value=self.settings.get("theme", "System Sync"),
+            border_color="#29292e"
+        )
+        
+        app_settings_box = ft.Container(
+            content=ft.Column([
+                ft.Row([ft.Icon(ft.Icons.PALETTE, color="#3b82f6", size=18), ft.Text("Application Visual Settings", size=14, weight=ft.FontWeight.BOLD, color=text_color)], spacing=10),
+                self.lang_field,
+                self.size_field,
+                self.theme_field,
+                ft.Row([
+                    ft.ElevatedButton("Save Environment UI Settings", bgcolor="#3b82f6", color="#ffffff", on_click=self.save_ui_settings)
+                ], alignment=ft.MainAxisAlignment.END)
+            ], spacing=10),
+            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color="#29292e")
+        )
+        
+        # License Card
+        license_text = (
+            "Solana Telegram Tracker Configurator v1.4.0 (Flet Engine)\n"
+            "Licensed under the MIT License.\n"
+            "Permission is hereby granted, free of charge, to any person obtaining a copy..."
+        )
+        license_box = ft.Container(
+            content=ft.Column([
+                ft.Row([ft.Icon(ft.Icons.INFO, color="#3b82f6", size=18), ft.Text("License & About", size=14, weight=ft.FontWeight.BOLD, color=text_color)], spacing=10),
+                ft.Text(license_text, size=11, color="#8d8d99", font_family="Consolas")
+            ], spacing=10),
+            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color="#29292e")
+        )
+        
+        return ft.Column([backup_box, app_settings_box, license_box], spacing=15, scroll=ft.ScrollMode.AUTO, expand=True)
+
+    def save_ui_settings(self, e):
+        self.settings["language"] = self.lang_field.value
+        self.settings["font_size"] = self.size_field.value
+        self.settings["theme"] = self.theme_field.value
+        
+        self.save_state()
+        self.apply_theme_settings()
+        self.show_popup("Success", "UI settings applied successfully! Refreshing panel...")
+        
+        # Force re-render sidebar buttons
+        self.page.controls.clear()
+        self.build_ui()
+        self.page.update()
+
+    def export_config(self, e):
+        if not self.chat_id:
+            self.show_popup("Error", "Telegram Chat ID must be configured to export.")
+            return
+            
+        chat_id_str = str(self.chat_id)
+        chat_data = self.state.get("chats", {}).get(chat_id_str, {})
+        tracked = chat_data.get("tracked", {})
+        if not tracked:
+            self.show_popup("Warning", "No tracked addresses found to export.")
+            return
+            
+        # Export as a pretty-printed JSON file in root
+        export_path = os.path.join(BASE_DIR, "watchlist_backup.json")
+        try:
+            with open(export_path, "w") as f:
+                json.dump({"chats": {chat_id_str: chat_data}}, f, indent=4)
+            self.show_popup("Success", f"Configuration exported to:\n{export_path}")
+        except Exception as ex:
+            self.show_popup("Error", f"Failed to export: {ex}")
+
+    def import_config(self, e):
+        import_path = os.path.join(BASE_DIR, "watchlist_backup.json")
+        if not os.path.exists(import_path):
+            self.show_popup("Error", "No watchlist_backup.json file found to import.")
+            return
+            
+        try:
+            with open(import_path, "r") as f:
+                imported = json.load(f)
+                
+            chats = imported.get("chats", {})
+            if not chats:
+                self.show_popup("Error", "Invalid backup format.")
+                return
+                
+            # Merge chats
+            for chat_id, data in chats.items():
+                self.state.setdefault("chats", {})[chat_id] = data
+                
+            self.save_state()
+            self.update_wallet_lists()
+            self.refresh_dashboard_table()
+            self.update_metrics_values()
+            self.load_balances_async()
+            self.show_popup("Success", "Watchlist configurations imported and merged successfully!")
+        except Exception as ex:
+            self.show_popup("Error", f"Failed to import: {ex}")
+
+
+def main(page: ft.Page):
+    FletConfiguratorApp(page)
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = ConfiguratorApp(root)
-    root.protocol("WM_DELETE_WINDOW", app.clean_exit)
-    root.mainloop()
+    is_unc = os.getcwd().startswith("\\\\")
+    force_web = "--web" in sys.argv or is_unc
+    
+    # Auto-detect WSL environment where graphics acceleration is frequently broken
+    is_wsl = False
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/sys/kernel/osrelease", "r") as f:
+                if "microsoft" in f.read().lower():
+                    is_wsl = True
+        except Exception:
+            pass
+            
+    if is_wsl:
+        print("WSL environment detected. Defaulting to local web server mode...")
+        force_web = True
+    
+    # Auto-detect headless Linux environments lacking display drivers
+    if sys.platform.startswith("linux") and not is_wsl:
+        has_display = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+        if not has_display:
+            print("No graphical display server found (headless environment). Defaulting to web browser mode.")
+            force_web = True
+
+    if force_web:
+        print("Launching local web server...")
+        print("==========================================================")
+        print("  Please open the following link in your web browser:")
+        print("  --> http://127.0.0.1:8550 <--")
+        print("==========================================================")
+        try:
+            ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=8550)
+        except Exception as ex:
+            try:
+                ft.app(target=main, view=ft.AppView.WEB_BROWSER)
+            except Exception as ex2:
+                print(f"Failed to launch: {ex2}")
+    else:
+        try:
+            # Default to native desktop application window
+            import time
+            start_time = time.time()
+            ft.app(target=main)
+            duration = time.time() - start_time
+            # If the app exits in less than 4 seconds, it indicates a startup crash (like missing/broken Mesa drivers)
+            if duration < 4.0:
+                print("Desktop client shut down immediately. This might be due to missing OS graphics drivers.")
+                raise RuntimeError("Immediate desktop client exit")
+        except Exception as e:
+            print(f"Failed to run in desktop mode: {e}")
+            print("Falling back to local web server mode...")
+            print("==========================================================")
+            print("  Please open the following link in your web browser:")
+            print("  --> http://127.0.0.1:8550 <--")
+            print("==========================================================")
+            try:
+                ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=8550)
+            except Exception as ex:
+                try:
+                    ft.app(target=main, view=ft.AppView.WEB_BROWSER)
+                except Exception as ex2:
+                    print(f"Failed to launch: {ex2}")

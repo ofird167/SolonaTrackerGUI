@@ -30,7 +30,7 @@ telegramcrypt/
 ├── requirements.txt           # Python package dependencies
 ├── example.env                # Template showing environment variable setup
 ├── tracker.py                 # Core background Solana poller and Telegram handler
-├── configurator.py            # Dark-themed Tkinter desktop configuration GUI
+├── configurator.py            # Modern Flet-based desktop/web configuration GUI
 ├── run.sh                     # Linux/WSL shell launcher script (creates venv & launches GUI)
 └── run.bat                    # Windows batch launcher script
 ```
@@ -85,7 +85,7 @@ To prevent sensitive credentials (such as your Telegram Bot API Token or custom 
 
 ## 🖥️ Desktop Configuration Panel
 
-The Desktop GUI (`configurator.py`) provides an easy interface to control the bot:
+The Configuration Panel (`configurator.py`) is written in Flet (Flutter-based Python framework) and runs as a native desktop application. On headless Linux or WSL environments (lacking X11 display capabilities), it automatically falls back to launch as a local web service running on `http://127.0.0.1:8550`.
 
 ![Desktop Configurator Main Panel](assets/screenshot_main.png)
 *Main Dashboard for bot activation, credentials management, and live log monitoring.*
@@ -112,7 +112,14 @@ The Desktop GUI (`configurator.py`) provides an easy interface to control the bo
 4. **Execution Console**:
    * **Start / Stop Tracker Bot**: Launches or kills the background tracker process.
    * **Status Dot & Uptime**: A pulsing status dot flashes green when active, displaying a real-time `Uptime: HH:MM:SS` counter.
-   * **Live Monospace Logs**: Color-coded view of application logs (`INFO` in blue, `WARNING` in yellow, `ERROR` in red) to monitor operations.
+    * **Live Monospace Logs**: Color-coded view of application logs (`INFO` in blue, `WARNING` in yellow, `ERROR` in red) to monitor operations.
+
+### 📸 Automated Screenshot Capture & Censorship
+For documentation and release updates, an automated screenshot utility is included. Run:
+```bash
+.venv/bin/python capture_screenshots.py
+```
+This script automatically backs up your settings, populates safe mock data, starts the Flet web server headlessly using Playwright, navigates through all tabs, captures square (`1024x1024`) dark-themed screenshots into `assets/`, and restores your original configuration files when done.
 
 ---
 

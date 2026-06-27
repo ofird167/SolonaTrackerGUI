@@ -44,7 +44,7 @@ if %errorlevel% neq 0 (
 :: Compile configurator.py
 echo.
 echo Compiling configurator.py...
-pyinstaller --onefile --noconsole configurator.py
+pyinstaller --onefile --noconsole --add-data ".venv_win\Lib\site-packages\flet\controls\material\icons.json;flet\controls\material" configurator.py
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to compile configurator.py
     pause
