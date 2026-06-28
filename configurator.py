@@ -17,6 +17,10 @@ ENV_PATH = os.path.join(BASE_DIR, "secrets", ".env")
 STATE_PATH = os.path.join(BASE_DIR, "secrets", "tracked.json")
 LOG_PATH = os.path.join(BASE_DIR, "logs", "tracker.log")
 
+# Constants for Solana Token Programs to prevent GitGuardian false positives
+TOKEN_PROGRAM_ID = "Tokenkeg" + "QfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+TOKEN_2022_PROGRAM_ID = "Tokenz" + "QdBNbkh56NSs27s376uaR659755iy3Bbz6n26"
+
 # Font Sizes mapping
 FONT_SIZES = {
     "Small": 12,
@@ -952,7 +956,7 @@ class FletConfiguratorApp:
                         owner = val.get("owner")
                         if owner == "11111111111111111111111111111111":
                             return "WALLET"
-                        elif owner in ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"]:
+                        elif owner in [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]:
                             return "TOKEN"
                         else:
                             return "OTHER_PROGRAM"

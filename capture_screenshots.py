@@ -54,13 +54,13 @@ def write_mock_files():
                 "show_coin_link": True,
                 "show_market_cap": True,
                 "tracked": {
-                    "71HuFmuYAFEFUna2x2R4HJjrFNQHGuagW3gUMFToL9tk": {
+                    "5K5YgZ2vX3eWJg3q1x2y3z4w5v6u7t8s9r0qPNoW1111": {
                         "type": "user",
-                        "name": "trump2"
+                        "name": "mock_wallet_1"
                     },
-                    "Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8": {
+                    "5K5YgZ2vX3eWJg3q1x2y3z4w5v6u7t8s9r0qPNoT2222": {
                         "type": "wallet",
-                        "name": "spacex"
+                        "name": "mock_token_1"
                     }
                 },
                 "accumulated_txs": [],
@@ -68,8 +68,8 @@ def write_mock_files():
             }
         },
         "global_last_signatures": {
-            "71HuFmuYAFEFUna2x2R4HJjrFNQHGuagW3gUMFToL9tk": "jTzyxoTsJZCt32LXcFJoyagMbojTka8npG2rrv4Q5f7nKEs6cEFZxjTkZfuWYuezXuxVxdN9Lw4nB7tWitvK3Xx",
-            "Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8": "32aSMT9hcPTvFPkv4CwHKdbLPSopZWhoWpghV5MPq92bdV8xGwunxMNrUt7V1Ge1oDpUn3J8eMBvmbzBA2xAdonH"
+            "5K5YgZ2vX3eWJg3q1x2y3z4w5v6u7t8s9r0qPNoW1111": "mock_sig_wallet",
+            "5K5YgZ2vX3eWJg3q1x2y3z4w5v6u7t8s9r0qPNoT2222": "mock_sig_token"
         },
         "settings": {
             "language": "English",
