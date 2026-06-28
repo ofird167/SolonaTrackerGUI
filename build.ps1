@@ -34,7 +34,9 @@ if ($LASTEXITCODE -ne 0) {
 # Compile configurator.py
 Write-Host ""
 Write-Host "Compiling configurator.py..."
-.\.venv_win\Scripts\pyinstaller.exe --onefile --noconsole --add-data ".venv_win\Lib\site-packages\flet\controls\material\icons.json;flet\controls\material" configurator.py
+if (Test-Path "build") { Remove-Item -Recurse -Force "build" }
+if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }
+.\.venv_win\Scripts\flet.exe pack configurator.py
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] Failed to compile configurator.py"
     Exit 1

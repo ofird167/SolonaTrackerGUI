@@ -38,7 +38,8 @@ fi
 # Compile configurator.py
 echo
 echo "Compiling configurator.py..."
-pyinstaller --onefile --noconsole configurator.py
+rm -rf build dist
+flet pack configurator.py
 if [ $? -ne 0 ]; then
     echo "[ERROR] Failed to compile configurator.py"
     exit 1
