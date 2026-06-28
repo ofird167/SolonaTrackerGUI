@@ -2398,6 +2398,16 @@ def solana_poller_loop():
                 if not sigs:
                     continue
                     
+                if not last_sig:
+                    latest_sig = sigs[0].get("signature")
+                    with state_lock:
+                        if "global_last_signatures" not in state:
+                            state["global_last_signatures"] = {}
+                        state["global_last_signatures"][address] = latest_sig
+                        save_state_unlocked()
+                    logger.info(f"Initialized tracking signature for {address[:8]}... to latest: {latest_sig}")
+                    continue
+                    
                 new_sigs = []
                 for item in sigs:
                     sig = item.get("signature")

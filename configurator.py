@@ -384,6 +384,10 @@ class FletConfiguratorApp:
         # Apply theme settings
         self.apply_theme_settings()
         
+        # Intercept native window close to automatically stop the bot process
+        self.page.window_prevent_close = True
+        self.page.on_window_event = self.handle_window_event
+        
         # Build UI Structure
         self.build_ui()
         
@@ -423,6 +427,11 @@ class FletConfiguratorApp:
                 body_medium=ft.TextStyle(size=font_size_pt)
             )
         )
+
+    def handle_window_event(self, e):
+        if e.data == "close":
+            self.stop_bot()
+            self.page.window_destroy()
 
     def detect_linux_theme(self):
         try:
@@ -529,7 +538,7 @@ class FletConfiguratorApp:
             "wallets": ft.Container(content=ft.Text("👛  " + self.tr("wallet_manager"), weight=ft.FontWeight.BOLD), padding=12, border_radius=8, on_click=lambda e: self.navigate_to("wallets")),
             "settings": ft.Container(content=ft.Text("⚙️  " + self.tr("settings_credentials"), weight=ft.FontWeight.BOLD), padding=12, border_radius=8, on_click=lambda e: self.navigate_to("settings")),
             "logs": ft.Container(content=ft.Text("📋  " + self.tr("live_console"), weight=ft.FontWeight.BOLD), padding=12, border_radius=8, on_click=lambda e: self.navigate_to("logs")),
-            "backup": ft.Container(content=ft.Text("💾  " + self.tr("backup_license"), weight=ft.FontWeight.BOLD), padding=12, border_radius=8, on_click=lambda e: self.navigate_to("backup")),
+            "license": ft.Container(content=ft.Text("📄  License & About", weight=ft.FontWeight.BOLD), padding=12, border_radius=8, on_click=lambda e: self.navigate_to("license")),
         }
         
         menu_column = ft.Column(
@@ -560,7 +569,7 @@ class FletConfiguratorApp:
             "wallets": self.build_wallets_view(),
             "settings": self.build_settings_view(),
             "logs": self.build_logs_view(),
-            "backup": self.build_backup_view(),
+            "license": self.build_license_view(),
         }
         
         self.active_title = ft.Text("Dashboard Overview", size=20, weight=ft.FontWeight.BOLD, color="#10b981")
@@ -606,7 +615,7 @@ class FletConfiguratorApp:
             "wallets": "Tracked Wallets & Token Accounts",
             "settings": "Settings & Credentials",
             "logs": "Live Console Logs Feed",
-            "backup": "Backup & System Settings"
+            "license": "License & About"
         }
         self.active_title.value = title_map[target_name]
         
@@ -636,6 +645,7 @@ class FletConfiguratorApp:
     def build_dashboard_view(self):
         card_bg = "#1a1a1e" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff"
         text_color = "#e1e1e6" if self.page.theme_mode == ft.ThemeMode.DARK else "#18181b"
+        border_color = "#29292e" if self.page.theme_mode == ft.ThemeMode.DARK else "#e4e4e7"
         
         # KPI 1: Wallets
         self.val_wallets = ft.Text("0", size=24, weight=ft.FontWeight.BOLD, color="#10b981")
@@ -645,7 +655,7 @@ class FletConfiguratorApp:
                 self.val_wallets
             ], spacing=5),
             bgcolor=card_bg, padding=15, border_radius=10, expand=True,
-            border=ft.Border.all(width=1, color="#29292e")
+            border=ft.Border.all(width=1, color=border_color)
         )
         
         # KPI 2: Active Alert Channel
@@ -656,29 +666,29 @@ class FletConfiguratorApp:
                 self.val_channels
             ], spacing=5),
             bgcolor=card_bg, padding=15, border_radius=10, expand=True,
-            border=ft.Border.all(width=1, color="#29292e")
+            border=ft.Border.all(width=1, color=border_color)
         )
         
         # KPI 3: Total SOL Balance
-        self.val_sol = ft.Text("0.00 SOL", size=24, weight=ft.FontWeight.BOLD, color="#e1e1e6")
+        self.val_sol = ft.Text("0.00 SOL", size=24, weight=ft.FontWeight.BOLD, color=text_color)
         kpi_sol = ft.Container(
             content=ft.Column([
                 ft.Text("Total Solana Balance", color="#8d8d99", size=12),
                 self.val_sol
             ], spacing=5),
             bgcolor=card_bg, padding=15, border_radius=10, expand=True,
-            border=ft.Border.all(width=1, color="#29292e")
+            border=ft.Border.all(width=1, color=border_color)
         )
         
         # KPI 4: Token watch count
-        self.val_tokens = ft.Text("0", size=24, weight=ft.FontWeight.BOLD, color="#e1e1e6")
+        self.val_tokens = ft.Text("0", size=24, weight=ft.FontWeight.BOLD, color=text_color)
         kpi_tokens = ft.Container(
             content=ft.Column([
                 ft.Text("Tracked Token Accounts", color="#8d8d99", size=12),
                 self.val_tokens
             ], spacing=5),
             bgcolor=card_bg, padding=15, border_radius=10, expand=True,
-            border=ft.Border.all(width=1, color="#29292e")
+            border=ft.Border.all(width=1, color=border_color)
         )
         
         kpi_row = ft.Row([kpi_wallets, kpi_channels, kpi_sol, kpi_tokens], spacing=10)
@@ -715,13 +725,13 @@ class FletConfiguratorApp:
             content=ft.Column([
                 controls_row,
                 headers_row,
-                ft.Divider(color="#29292e"),
+                ft.Divider(color=border_color),
                 self.dashboard_list
             ], expand=True),
             bgcolor=card_bg,
             padding=15,
             border_radius=12,
-            border=ft.Border.all(width=1, color="#29292e"),
+            border=ft.Border.all(width=1, color=border_color),
             expand=True
         )
         
@@ -803,6 +813,7 @@ class FletConfiguratorApp:
             
             # 6. Action Buttons Row
             actions = ft.Row([
+                ft.IconButton(icon=ft.Icons.OPEN_IN_NEW, icon_color="#3b82f6", icon_size=16, tooltip="View on Solscan", on_click=lambda e, a=addr: self.page.launch_url(f"https://solscan.io/account/{a}")),
                 ft.IconButton(icon=ft.Icons.CONTENT_COPY, icon_color="#8d8d99", icon_size=16, tooltip="Copy Address", on_click=lambda e, a=addr: self.copy_to_clipboard(a)),
                 ft.IconButton(icon=ft.Icons.DELETE, icon_color="#ef4444", icon_size=16, tooltip="Remove Wallet", on_click=lambda e, a=addr: self.delete_wallet_dashboard(a))
             ], spacing=2, alignment=ft.MainAxisAlignment.END)
@@ -816,7 +827,7 @@ class FletConfiguratorApp:
                     addr_display,
                     ft.Text(bal_text, size=13, width=180),
                     status_pill,
-                    ft.Container(content=actions, width=100)
+                    ft.Container(content=actions, width=130)
                 ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 bgcolor="#111613" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff",
                 padding=10,
@@ -829,7 +840,7 @@ class FletConfiguratorApp:
         self.page.update()
 
     def copy_to_clipboard(self, address):
-        self.page.set_clipboard(address)
+        self.page.run_task(self.page.clipboard.set, address)
         self.show_popup("Copied", "Address copied to clipboard successfully!")
 
     def delete_wallet_dashboard(self, address):
@@ -1010,6 +1021,7 @@ class FletConfiguratorApp:
     def build_wallets_view(self):
         # We also support direct visual wallet manager lists as back compatibility
         card_bg = "#1a1a1e" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff"
+        border_color = "#29292e" if self.page.theme_mode == ft.ThemeMode.DARK else "#e4e4e7"
         
         self.user_wallets_col = ft.Column(spacing=5, scroll=ft.ScrollMode.AUTO, expand=True)
         self.token_accounts_col = ft.Column(spacing=5, scroll=ft.ScrollMode.AUTO, expand=True)
@@ -1020,7 +1032,7 @@ class FletConfiguratorApp:
                 self.user_wallets_col
             ], expand=True),
             bgcolor=card_bg, padding=12, border_radius=8, expand=True,
-            border=ft.Border.all(width=1, color="#29292e")
+            border=ft.Border.all(width=1, color=border_color)
         )
         
         token_container = ft.Container(
@@ -1029,7 +1041,7 @@ class FletConfiguratorApp:
                 self.token_accounts_col
             ], expand=True),
             bgcolor=card_bg, padding=12, border_radius=8, expand=True,
-            border=ft.Border.all(width=1, color="#29292e")
+            border=ft.Border.all(width=1, color=border_color)
         )
         
         self.update_wallet_lists()
@@ -1068,11 +1080,12 @@ class FletConfiguratorApp:
     def build_settings_view(self):
         card_bg = "#1a1a1e" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff"
         text_color = "#e1e1e6" if self.page.theme_mode == ft.ThemeMode.DARK else "#18181b"
+        border_color = "#29292e" if self.page.theme_mode == ft.ThemeMode.DARK else "#e4e4e7"
         
         # Credentials Form Fields
-        self.token_field = ft.TextField(label="Telegram Bot Token", password=True, can_reveal_password=True, value=self.token, border_color="#29292e")
-        self.chat_field = ft.TextField(label="Telegram Chat ID", value=self.chat_id, border_color="#29292e")
-        self.rpc_field = ft.TextField(label="Solana RPC URL Preset", value=self.rpc_url, border_color="#29292e")
+        self.token_field = ft.TextField(label="Telegram Bot Token", password=True, can_reveal_password=True, value=self.token, border_color=border_color)
+        self.chat_field = ft.TextField(label="Telegram Chat ID", value=self.chat_id, border_color=border_color)
+        self.rpc_field = ft.TextField(label="Solana RPC URL Preset", value=self.rpc_url, border_color=border_color)
         
         # Connection Save Frame
         conn_box = ft.Container(
@@ -1086,7 +1099,7 @@ class FletConfiguratorApp:
                     ft.ElevatedButton("Save Credentials", bgcolor="#3b82f6", color="#ffffff", on_click=self.save_connections)
                 ], alignment=ft.MainAxisAlignment.END)
             ], spacing=10),
-            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color="#29292e")
+            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color=border_color)
         )
         
         # Preferences Form Fields
@@ -1094,26 +1107,26 @@ class FletConfiguratorApp:
             label="Default Currency",
             options=[ft.dropdown.Option(c) for c in ["USD", "NIS", "CAD", "EUR", "GBP", "AUD"]],
             value=self.get_chat_pref("currency", "USD"),
-            border_color="#29292e"
+            border_color=border_color
         )
         
         self.interval_field = ft.Dropdown(
             label="Summary Interval (Minutes)",
             options=[ft.dropdown.Option(i) for i in ["1", "5", "15", "30", "60", "120", "240", "480"]],
             value=str(self.get_chat_pref("interval", 1)),
-            border_color="#29292e"
+            border_color=border_color
         )
         
         self.status_int_field = ft.Dropdown(
             label="Status Interval (Minutes)",
             options=[ft.dropdown.Option(i) for i in ["1", "5", "10", "15", "30", "60"]],
             value=str(self.get_chat_pref("status_interval", 5)),
-            border_color="#29292e"
+            border_color=border_color
         )
         
-        self.whale_field = ft.TextField(label="Whale Threshold (% of supply)", value=str(self.get_chat_pref("whale_threshold", 1.0)), border_color="#29292e")
-        self.daily_time_field = ft.TextField(label="Daily Snapshot Time (HH:MM)", value=self.get_chat_pref("daily_summary_time", "00:00"), border_color="#29292e")
-        self.noise_field = ft.TextField(label="Noise Threshold (USD Alert Filter)", value=str(self.get_chat_pref("noise_threshold", 0.0)), border_color="#29292e")
+        self.whale_field = ft.TextField(label="Whale Threshold (% of supply)", value=str(self.get_chat_pref("whale_threshold", 1.0)), border_color=border_color)
+        self.daily_time_field = ft.TextField(label="Daily Snapshot Time (HH:MM)", value=self.get_chat_pref("daily_summary_time", "00:00"), border_color=border_color)
+        self.noise_field = ft.TextField(label="Noise Threshold (USD Alert Filter)", value=str(self.get_chat_pref("noise_threshold", 0.0)), border_color=border_color)
         
         self.chk_coin_link = ft.Checkbox(label="Show Coin Links (Dexscreener)", value=self.get_chat_pref("show_coin_link", True))
         self.chk_market_cap = ft.Checkbox(label="Show Token Market Cap", value=self.get_chat_pref("show_market_cap", True))
@@ -1131,10 +1144,56 @@ class FletConfiguratorApp:
                     ft.ElevatedButton("Save Preferences", bgcolor="#3b82f6", color="#ffffff", on_click=self.save_preferences)
                 ], alignment=ft.MainAxisAlignment.END)
             ], spacing=10),
-            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color="#29292e")
+            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color=border_color)
+        )
+
+        # Visual Settings Card (moved from backup)
+        self.lang_field = ft.Dropdown(
+            label="Language Selection",
+            options=[ft.dropdown.Option(lang) for lang in ["English", "Russian", "Arabic"]],
+            value=self.settings.get("language", "English"),
+            border_color=border_color
+        )
+        self.size_field = ft.Dropdown(
+            label="UI Font Size",
+            options=[ft.dropdown.Option(sz) for sz in ["Small", "Medium", "Large"]],
+            value=self.settings.get("font_size", "Medium"),
+            border_color=border_color
+        )
+        self.theme_field = ft.Dropdown(
+            label="UI Theme Mode",
+            options=[ft.dropdown.Option(th) for th in ["Dark Mode", "Light Mode", "System Sync"]],
+            value=self.settings.get("theme", "System Sync"),
+            border_color=border_color
         )
         
-        return ft.Column([conn_box, pref_box], spacing=15, scroll=ft.ScrollMode.AUTO, expand=True)
+        app_settings_box = ft.Container(
+            content=ft.Column([
+                ft.Row([ft.Icon(ft.Icons.PALETTE, color="#3b82f6", size=18), ft.Text("Application Visual Settings", size=14, weight=ft.FontWeight.BOLD, color=text_color)], spacing=10),
+                self.lang_field,
+                self.size_field,
+                self.theme_field,
+                ft.Row([
+                    ft.ElevatedButton("Save Environment UI Settings", bgcolor="#3b82f6", color="#ffffff", on_click=self.save_ui_settings)
+                ], alignment=ft.MainAxisAlignment.END)
+            ], spacing=10),
+            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color=border_color)
+        )
+
+        # Backup panel buttons (moved from backup)
+        backup_box = ft.Container(
+            content=ft.Column([
+                ft.Row([ft.Icon(ft.Icons.BACKUP, color="#3b82f6", size=18), ft.Text("Backup & Restore Data", size=14, weight=ft.FontWeight.BOLD, color=text_color)], spacing=10),
+                ft.Text(self.tr("backup_desc"), size=11, color="#8d8d99"),
+                ft.Row([
+                    ft.ElevatedButton("Export Tracked List", bgcolor="#3b82f6", color="#ffffff", on_click=self.export_config),
+                    ft.ElevatedButton("Import Tracked List", bgcolor="#3e3e42", color=text_color, on_click=self.import_config),
+                ], spacing=10)
+            ], spacing=10),
+            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color=border_color)
+        )
+        
+        return ft.Column([conn_box, pref_box, app_settings_box, backup_box], spacing=15, scroll=ft.ScrollMode.AUTO, expand=True)
 
     def test_connections(self, e):
         tg_token = self.token_field.value.strip()
@@ -1236,6 +1295,7 @@ class FletConfiguratorApp:
     def build_logs_view(self):
         card_bg = "#1a1a1e" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff"
         text_color = "#e1e1e6" if self.page.theme_mode == ft.ThemeMode.DARK else "#18181b"
+        border_color = "#29292e" if self.page.theme_mode == ft.ThemeMode.DARK else "#e4e4e7"
         
         # Engine Control Buttons
         self.flet_start_btn = ft.ElevatedButton("Start Bot Service", bgcolor="#10b981", color="#ffffff", on_click=lambda e: self.start_bot())
@@ -1255,7 +1315,7 @@ class FletConfiguratorApp:
             bgcolor="#0d0d0f" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff",
             padding=15,
             border_radius=8,
-            border=ft.Border.all(width=1, color="#29292e"),
+            border=ft.Border.all(width=1, color=border_color),
             expand=True
         )
         
@@ -1428,71 +1488,33 @@ class FletConfiguratorApp:
             self.logs_feed.value = f"Error reading logs: {e}"
         self.page.update()
 
-    def build_backup_view(self):
+    def build_license_view(self):
         card_bg = "#1a1a1e" if self.page.theme_mode == ft.ThemeMode.DARK else "#ffffff"
         text_color = "#e1e1e6" if self.page.theme_mode == ft.ThemeMode.DARK else "#18181b"
-        
-        # Backup panel buttons
-        backup_box = ft.Container(
-            content=ft.Column([
-                ft.Row([ft.Icon(ft.Icons.BACKUP, color="#3b82f6", size=18), ft.Text("Backup & Restore Data", size=14, weight=ft.FontWeight.BOLD, color=text_color)], spacing=10),
-                ft.Text(self.tr("backup_desc"), size=11, color="#8d8d99"),
-                ft.Row([
-                    ft.ElevatedButton("Export Tracked List", bgcolor="#3b82f6", color="#ffffff", on_click=self.export_config),
-                    ft.ElevatedButton("Import Tracked List", bgcolor="#3e3e42", color=text_color, on_click=self.import_config),
-                ], spacing=10)
-            ], spacing=10),
-            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color="#29292e")
-        )
-        
-        # App Settings Card
-        self.lang_field = ft.Dropdown(
-            label="Language Selection",
-            options=[ft.dropdown.Option(lang) for lang in ["English", "Russian", "Arabic"]],
-            value=self.settings.get("language", "English"),
-            border_color="#29292e"
-        )
-        self.size_field = ft.Dropdown(
-            label="UI Font Size",
-            options=[ft.dropdown.Option(sz) for sz in ["Small", "Medium", "Large"]],
-            value=self.settings.get("font_size", "Medium"),
-            border_color="#29292e"
-        )
-        self.theme_field = ft.Dropdown(
-            label="UI Theme Mode",
-            options=[ft.dropdown.Option(th) for th in ["Dark Mode", "Light Mode", "System Sync"]],
-            value=self.settings.get("theme", "System Sync"),
-            border_color="#29292e"
-        )
-        
-        app_settings_box = ft.Container(
-            content=ft.Column([
-                ft.Row([ft.Icon(ft.Icons.PALETTE, color="#3b82f6", size=18), ft.Text("Application Visual Settings", size=14, weight=ft.FontWeight.BOLD, color=text_color)], spacing=10),
-                self.lang_field,
-                self.size_field,
-                self.theme_field,
-                ft.Row([
-                    ft.ElevatedButton("Save Environment UI Settings", bgcolor="#3b82f6", color="#ffffff", on_click=self.save_ui_settings)
-                ], alignment=ft.MainAxisAlignment.END)
-            ], spacing=10),
-            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color="#29292e")
-        )
+        border_color = "#29292e" if self.page.theme_mode == ft.ThemeMode.DARK else "#e4e4e7"
         
         # License Card
         license_text = (
             "Solana Telegram Tracker Configurator v1.4.0 (Flet Engine)\n"
             "Licensed under the MIT License.\n"
-            "Permission is hereby granted, free of charge, to any person obtaining a copy..."
+            "Permission is hereby granted, free of charge, to any person obtaining a copy\n"
+            "of this software and associated documentation files (the \"Software\"), to deal\n"
+            "in the Software without restriction, including without limitation the rights\n"
+            "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n"
+            "copies of the Software, and to permit persons to whom the Software is\n"
+            "furnished to do so, subject to the following conditions:\n\n"
+            "The above copyright notice and this permission notice shall be included in all\n"
+            "copies or substantial portions of the Software."
         )
         license_box = ft.Container(
             content=ft.Column([
                 ft.Row([ft.Icon(ft.Icons.INFO, color="#3b82f6", size=18), ft.Text("License & About", size=14, weight=ft.FontWeight.BOLD, color=text_color)], spacing=10),
                 ft.Text(license_text, size=11, color="#8d8d99", font_family="Consolas")
             ], spacing=10),
-            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color="#29292e")
+            bgcolor=card_bg, padding=15, border_radius=10, border=ft.Border.all(width=1, color=border_color)
         )
         
-        return ft.Column([backup_box, app_settings_box, license_box], spacing=15, scroll=ft.ScrollMode.AUTO, expand=True)
+        return ft.Column([license_box], spacing=15, scroll=ft.ScrollMode.AUTO, expand=True)
 
     def save_ui_settings(self, e):
         self.settings["language"] = self.lang_field.value
